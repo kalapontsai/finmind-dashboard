@@ -1,0 +1,4 @@
+# 禁止瀏覽敏感目錄（無副檔名的路徑）
+RedirectMatch 403 ^/finmind/data(/|$)
+RedirectMatch 403 ^/finmind/lib(/|$)
+RedirectMatch 403 ^/finmind/config\.php$

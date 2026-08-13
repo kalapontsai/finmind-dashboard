@@ -1,0 +1,28 @@
+# ===== Secrets =====
+# FinMind API token（必要排除；雙層 token 機制見 SKILL.md）
+data/finmind_token.txt
+
+# ===== Generated data（可重產生）=====
+data/backtest_results.json
+data/stock_list.json
+
+# ===== Python 編譯產物 =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# ===== Quant 子專案暫存 =====
+quant/cache/
+quant/output/
+quant/data/
+
+# ===== 一般備用 =====
+*.log
+*.swp
+.DS_Store
+Thumbs.db
+
+# 保留 data/.gitkeep（讓 data/ 進版本）
+!.gitkeep

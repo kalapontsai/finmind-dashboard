@@ -267,6 +267,7 @@ def run(user_cfg: dict | None = None):
         total_score=total_score,
         volume=volume,
         rebalance_freq=cfg.get('rebalance_freq', 'monthly'),
+        min_liquidity_shares=cfg.get('min_liquidity_shares', 0),
     )
     market_close = fetch_0050_data(token=token, start=cfg['start'], end=cfg['end']) if cfg.get('use_0050_benchmark', True) else None
 

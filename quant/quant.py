@@ -185,7 +185,7 @@ def compute_factors(close: pd.DataFrame, pe: pd.DataFrame, roe: pd.DataFrame) ->
     return total_score, factor_val, factor_mom, factor_qual
 
 
-def build_position(close: pd.DataFrame, total_score: pd.DataFrame, volume: pd.DataFrame, rebalance_freq: str = 'monthly') -> tuple[pd.DataFrame, dict]:
+def build_position(close: pd.DataFrame, total_score: pd.DataFrame, volume: pd.DataFrame, rebalance_freq: str = 'monthly', min_liquidity_shares: int = 0) -> tuple[pd.DataFrame, dict]:
     """每月第一個交易日依總分選出 Top N，建持倉矩陣。"""
     log.info(f"每月選股 Top {TOP_N}，等權重 {EQUAL_WEIGHT:.0%}")
 
@@ -193,8 +193,12 @@ def build_position(close: pd.DataFrame, total_score: pd.DataFrame, volume: pd.Da
     total_score.index = pd.to_datetime(total_score.index)
     volume.index = pd.to_datetime(volume.index)
 
-    # 流動性過濾（20 日均量）
-    liq_filter = volume.rolling(20).mean() >= MIN_LIQUIDITY_SHARES if MIN_LIQUIDITY_SHARES > 0 else pd.DataFrame(True, index=volume.index, columns=volume.columns)
+    # 流動性過濾（20 日均量；0 = 不過濾）
+    if min_liquidity_shares > 0:
+        liq_filter = volume.rolling(20).mean() >= min_liquidity_shares
+        log.info(f"流動性過濾: 20 日均量 >= {min_liquidity_shares:,} 張")
+    else:
+        liq_filter = pd.DataFrame(True, index=volume.index, columns=volume.columns)
     valid_score = total_score.where(liq_filter)
 
     # 計算換倉日期（依 rebalance_freq）

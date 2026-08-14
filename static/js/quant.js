@@ -74,6 +74,10 @@ const QuantPage = {
                         <label style="font-size:12px; color:var(--text-muted);">滑價 (%)</label>
                         <input type="number" id="slippage" min="0" step="0.01" value="0.1" style="width:100%; padding:6px 8px; background:var(--bg-soft); border:1px solid var(--border); color:var(--text); border-radius:6px;">
                     </div>
+                    <div>
+                        <label style="font-size:12px; color:var(--text-muted);" title="20 日均量最低門檻（張）；0 = 不過濾">最低 20 日均量 (張)</label>
+                        <input type="number" id="minLiquidity" min="0" step="100" value="0" style="width:100%; padding:6px 8px; background:var(--bg-soft); border:1px solid var(--border); color:var(--text); border-radius:6px;">
+                    </div>
                 </div>
                 <div id="paramsMsg" style="font-size:12px; color:var(--text-muted); min-height:18px; margin-top:4px;"></div>
             </div>
@@ -323,6 +327,7 @@ const QuantPage = {
                 fee_sell: pct(document.getElementById('feeSell').value),
                 tax_sell: pct(document.getElementById('taxSell').value),
                 slippage: pct(document.getElementById('slippage').value),
+                min_liquidity_shares: parseInt(document.getElementById('minLiquidity').value, 10) || 0,
             };
 
             const data = await FinMindAPI.quantRun(params);

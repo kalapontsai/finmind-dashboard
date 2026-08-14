@@ -1,17 +1,10 @@
-<?php
-/**
- * FinMind Dashboard - 主入口
- * - Sidebar（個股分析 / 回測）+ Content area
- * - Hash-based 路由，由前端 JS 處理頁面切換
- */
-?>
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FinMind Dashboard</title>
-    <link rel="stylesheet" href="/finmind/assets/css/style.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
     <div class="app">
@@ -46,9 +39,17 @@
                 </a>
             </div>
 
+            <div class="nav-section">
+                <div class="nav-label">我的</div>
+                <a class="nav-link" data-nav="watchlist" href="#/watchlist">
+                    <span class="nav-icon">☆</span>
+                    <span>觀察名單</span>
+                </a>
+            </div>
+
             <div class="sidebar-footer">
                 <div>資料來源：<a href="https://finmindtrade.com/" target="_blank" rel="noopener">FinMind</a></div>
-                <div style="margin-top:6px;">v1.0</div>
+                <div style="margin-top:6px;">v2.0 (Flask)</div>
             </div>
         </aside>
 
@@ -65,12 +66,14 @@
 
     </div>
 
-    <script src="/finmind/assets/lib/chart.umd.js"></script>
-    <script src="/finmind/assets/js/api.js"></script>
-    <script src="/finmind/assets/js/indicators.js"></script>
-    <script src="/finmind/assets/js/analysis.js"></script>
-    <script src="/finmind/assets/js/backtest.js"></script>
-    <script src="/finmind/assets/js/quant.js"></script>
-    <script src="/finmind/assets/js/app.js"></script>
+    <script src="{{ url_for('static', filename='lib/chart.umd.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/indicators.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tooltip.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/watchlist.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/analysis.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/backtest.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/quant.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

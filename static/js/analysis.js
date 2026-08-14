@@ -114,6 +114,9 @@ const AnalysisPage = {
         // 個股搜尋
         this.bindSearch();
 
+        // 指標教學 ⓘ tooltip
+        if (window.IndicatorTip) IndicatorTip.bindAll();
+
         // 載入按鈕
         document.getElementById('loadBtn').addEventListener('click', () => this.loadAll());
 
@@ -278,9 +281,19 @@ const AnalysisPage = {
                 <span class="stock-name">${this.esc(this.currentStock.stock_name || '')}</span>
                 <span class="stock-price ${dir}">${Indicators.fmtNum(last.close)}</span>
                 <span class="stock-change ${dir}">${arrow} ${chg >= 0 ? '+' : ''}${Indicators.fmtNum(chg)} (${chg >= 0 ? '+' : ''}${Indicators.fmtNum(chgPct)}%)</span>
-                <span style="color:var(--text-dim); font-size:12px; margin-left:auto;">${last.date}</span>
+                <button class="btn btn-ghost" id="watchBtn" style="margin-left:auto; font-size:14px; padding:4px 10px;">${(window.Watchlist && Watchlist.has(last.stock_id)) ? '⭐ 已觀察' : '☆ 加入觀察名單'}</button>
+                <span style="color:var(--text-dim); font-size:12px;">${last.date}</span>
             </div>
         `;
+
+        // 綁定觀察名單按鈕
+        const wb = document.getElementById('watchBtn');
+        if (wb && window.Watchlist) {
+            wb.addEventListener('click', () => {
+                Watchlist.toggle(last.stock_id, this.currentStock.stock_name || '');
+                wb.textContent = Watchlist.has(last.stock_id) ? '⭐ 已觀察' : '☆ 加入觀察名單';
+            });
+        }
     },
 
     renderPriceChart(prices) {

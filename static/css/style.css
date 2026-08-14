@@ -539,3 +539,97 @@ td.num {
     .form-row { flex-direction: column; align-items: stretch; }
     .strategy-params { grid-template-columns: 1fr 1fr; }
 }
+
+/* ===== 指標教學 Tooltip ===== */
+/* ============================================
+ * 指標教學 Tooltip
+ * ============================================ */
+.tip-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 8px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: help;
+    position: relative;
+    user-select: none;
+    transition: color 0.15s, background 0.15s;
+}
+
+.tip-trigger:hover,
+.tip-trigger:focus {
+    color: var(--blue);
+    background: rgba(56, 139, 253, 0.15);
+    outline: none;
+}
+
+.tip-bubble {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1f2430;
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    width: 280px;
+    max-width: calc(100vw - 40px);
+    text-transform: none;
+    letter-spacing: normal;
+    font-weight: 400;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s, transform 0.15s;
+    z-index: 100;
+    text-align: left;
+}
+
+.tip-bubble::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 10px;
+    height: 10px;
+    background: #1f2430;
+    border-left: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+}
+
+.tip-trigger:hover .tip-bubble,
+.tip-trigger:focus .tip-bubble {
+    opacity: 1;
+    transform: translateX(-50%) translateY(2px);
+}
+
+/* 螢幕右邊的卡 → tooltip 改往左 */
+.tip-trigger.bubble-left .tip-bubble {
+    left: auto;
+    right: 0;
+    transform: translateX(0);
+}
+.tip-trigger.bubble-left .tip-bubble::before {
+    left: auto;
+    right: 10px;
+    transform: translateX(0) rotate(45deg);
+}
+
+/* 螢幕左邊的卡 → tooltip 改往右 */
+.tip-trigger.bubble-right .tip-bubble {
+    left: 0;
+    transform: translateX(0);
+}
+.tip-trigger.bubble-right .tip-bubble::before {
+    left: 10px;
+    transform: translateX(0) rotate(45deg);
+}

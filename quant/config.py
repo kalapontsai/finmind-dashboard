@@ -4,27 +4,26 @@
 """
 
 import os
+import sys
 from pathlib import Path
 
 # === 1. FinMind Token ===
-# 透過環境變數 FINMIND_ENV_FILE 指向你的 .env 檔案。
-# 設定方式：export FINMIND_ENV_FILE=/path/to/your/.env
-# 注意：同 IP 使用多個 token 會導致兩個都被封鎖，請只留一個
-ENV_FILE = Path(os.environ.get('FINMIND_ENV_FILE', '<unset: set FINMIND_ENV_FILE>'))
+# 從根目錄的 app_config.py 載入（單一來源）
+# 設定 application 的 token 來源：data/finmind_token.txt 或 ~/.env
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from app_config import FINMIND_TOKEN  # noqa: E402
 
 
 def load_finmind_token() -> str:
-    """從 .env 讀取 FINMIND_TOKEN（只取第一個）。"""
-    if not ENV_FILE.is_file():
-        raise FileNotFoundError(f"找不到 .env：{ENV_FILE}")
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith('#') or '=' not in line:
-            continue
-        k, v = line.split('=', 1)
-        if k.strip() == 'FINMIND_TOKEN':
-            return v.strip()
-    raise ValueError('.env 沒有 FINMIND_TOKEN')
+    """從 app_config 讀取 FINMIND_TOKEN（與 Flask 共用同一份）。"""
+    if not FINMIND_TOKEN:
+        raise ValueError(
+            'FINMIND_TOKEN 未設定。請在 data/finmind_token.txt 或 ~/.env 設定。'
+        )
+    return FINMIND_TOKEN
 
 
 # === 2. 回測區間 ===

@@ -1,8 +1,8 @@
 /**
- * FinMind API Client（前端呼叫我們自己的 PHP 後端）
+ * FinMind API Client（前端呼叫 Flask 後端）
  */
 const FinMindAPI = {
-    base: '/finmind/api',
+    base: '/api',
 
     async get(url, params = {}) {
         // 過濾掉 undefined / null，避免 URLSearchParams 把 undefined 轉成 "undefined" 字串
@@ -26,11 +26,11 @@ const FinMindAPI = {
     },
 
     stockList(q = '', limit = 50) {
-        return this.get('stock_list.php', { q, limit });
+        return this.get('stock_list', { q, limit });
     },
 
     stockPrice(stockId, startDate, endDate) {
-        return this.get('stock_price.php', {
+        return this.get('stock_price', {
             stock_id: stockId,
             start_date: startDate,
             end_date: endDate,
@@ -38,30 +38,42 @@ const FinMindAPI = {
     },
 
     stockPer(stockId, startDate, endDate) {
-        return this.get('stock_per.php', { stock_id: stockId, start_date: startDate, end_date: endDate });
+        return this.get('stock_per', { stock_id: stockId, start_date: startDate, end_date: endDate });
     },
 
     stockRevenue(stockId, startDate, endDate) {
-        return this.get('stock_revenue.php', { stock_id: stockId, start_date: startDate, end_date: endDate });
+        return this.get('stock_revenue', { stock_id: stockId, start_date: startDate, end_date: endDate });
     },
 
     stockFinance(stockId, startDate, endDate) {
-        return this.get('stock_finance.php', { stock_id: stockId, start_date: startDate, end_date: endDate });
+        return this.get('stock_finance', { stock_id: stockId, start_date: startDate, end_date: endDate });
     },
 
     stockDividend(stockId, startDate, endDate) {
-        return this.get('stock_dividend.php', { stock_id: stockId, start_date: startDate, end_date: endDate });
+        return this.get('stock_dividend', { stock_id: stockId, start_date: startDate, end_date: endDate });
     },
 
     institutional(stockId, startDate, endDate) {
-        return this.get('institutional.php', { stock_id: stockId, start_date: startDate, end_date: endDate });
+        return this.get('institutional', { stock_id: stockId, start_date: startDate, end_date: endDate });
     },
 
     margin(stockId, startDate, endDate) {
-        return this.get('margin.php', { stock_id: stockId, start_date: startDate, end_date: endDate });
+        return this.get('margin', { stock_id: stockId, start_date: startDate, end_date: endDate });
     },
 
     backtest(params) {
-        return this.post('backtest.php', params);
+        return this.post('backtest', params);
+    },
+
+    quantRun() {
+        return this.post('quant_run', {});
+    },
+
+    quantStatus() {
+        return this.get('quant_status');
+    },
+
+    quantPool() {
+        return this.get('quant_pool');
     },
 };

@@ -7,6 +7,7 @@ const App = {
         'analysis':  { title: '個股分析', desc: '台股個股技術面 + 基本面 + 籌碼面整合分析', hash: 'taiwan-stock-analysis', render: (c) => AnalysisPage.render(c) },
         'backtest':  { title: '策略回測', desc: '依歷史股價回測 MA / RSI / KD / MACD 策略績效',     hash: 'back-testing',         render: (c) => BacktestPage.render(c) },
         'quant':     { title: '多因子回測', desc: 'Python 量化：價值 40% + 動能 30% + 品質 30%，月頻調倉',  hash: 'quant-backtest',     render: (c) => QuantPage.render(c) },
+        'watchlist': { title: '觀察名單', desc: '自選股追蹤清單（localStorage 儲存）',                 hash: 'watchlist',            render: (c) => WatchlistPage.render(c) },
     },
 
     /**
@@ -73,8 +74,8 @@ const App = {
 
         // 清空舊 charts
         if (window.Chart && Chart.helpers) {
-            // Chart.js 4 — destroy by registry
             Chart.getChart('priceChart')?.destroy();
+            Chart.getChart('volumeChart')?.destroy();
             Chart.getChart('rsiChart')?.destroy();
             Chart.getChart('kdChart')?.destroy();
             Chart.getChart('macdChart')?.destroy();
@@ -87,6 +88,11 @@ const App = {
         const container = document.getElementById('pageContent');
         container.innerHTML = '';
         page.render(container);
+
+        // 指標 tooltip 自動綁定（卡片標題）
+        if (window.IndicatorTip) {
+            IndicatorTip.bindAll(container);
+        }
     },
 
     /**

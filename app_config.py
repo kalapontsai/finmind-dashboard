@@ -21,8 +21,10 @@ for p in (DATA_DIR, QUANT_DIR, STATIC_DIR, TEMPLATES_DIR):
 # 量化產出目錄
 QUANT_OUTPUT_DIR = QUANT_DIR / 'output'
 QUANT_CACHE_DIR = QUANT_DIR / 'cache'
+QUANT_PROGRESS_DIR = QUANT_DIR / 'progress'
 QUANT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 QUANT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+QUANT_PROGRESS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ────────────────────────── Token ──────────────────────────
 FINMIND_API_BASE = 'https://api.finmindtrade.com/api/v4/data'

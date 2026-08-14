@@ -18,9 +18,16 @@ import numpy as np
 import pandas as pd
 from FinMind.data import DataLoader
 
+import sys
+# 重要：quant/ 需先加，否則 `from config import` 找不到同目錄的 config.py
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.cost import (
+    DEFAULT_FEE_BUY, DEFAULT_FEE_SELL, DEFAULT_TAX_SELL, DEFAULT_SLIPPAGE,
+)
 from config import (
-    COMMISSION, EQUAL_WEIGHT, END_DATE, MIN_LIQUIDITY_SHARES, MOMENTUM_LOOKBACK,
-    START_DATE, STOCK_POOL, TAX, TOP_N, WEIGHTS, load_finmind_token,
+    EQUAL_WEIGHT, END_DATE, MARKET_BENCHMARK, MIN_LIQUIDITY_SHARES,
+    MOMENTUM_LOOKBACK, START_DATE, STOCK_POOL, TOP_N, WEIGHTS, load_finmind_token,
 )
 
 CACHE_DIR = Path(__file__).parent / 'cache'
@@ -38,7 +45,8 @@ class BacktestResult:
     strategy_ret: pd.Series
     strategy_net_ret: pd.Series
     cum_strategy: pd.Series
-    cum_benchmark: pd.Series
+    cum_benchmark: pd.Series   # 池子等權重 B&H（舊有）
+    cum_market_0050: pd.Series | None  # 0050 買進持有（雙基準新增）
     selected_monthly: dict  # {date: [stock_ids]}
     monthly_turnover: pd.Series
     monthly_cost: pd.Series
@@ -217,7 +225,38 @@ def build_position(close: pd.DataFrame, total_score: pd.DataFrame, volume: pd.Da
     return position, selected
 
 
-def run_backtest(close: pd.DataFrame, position: pd.DataFrame, total_score: pd.DataFrame = None) -> BacktestResult:
+def fetch_0050_data(token: str, start: str, end: str) -> pd.Series | None:
+    """抓 0050 收盤價，對齊交易日曆。"""
+    import time
+    CACHE_DIR.mkdir(exist_ok=True)
+    cache_path = CACHE_DIR / f"0050_{start}_{end}.parquet"
+    if cache_path.exists():
+        log.info("  0050 讀快取")
+        df = pd.read_parquet(cache_path)
+    else:
+        log.info(f"  抓取 0050 ({start} ~ {end})")
+        try:
+            dl = DataLoader()
+            dl.login_by_token(api_token=token)
+            df = dl.taiwan_stock_daily(stock_id='0050', start_date=start, end_date=end)
+            df.to_parquet(cache_path)
+        except Exception as e:
+            log.warning(f"  0050 抓取失敗：{e}")
+            return None
+        time.sleep(2)
+    if df is None or df.empty:
+        return None
+    close_0050 = df.pivot(index='date', columns='stock_id', values='close')['0050'].astype(float)
+    close_0050.index = pd.to_datetime(close_0050.index)
+    return close_0050
+
+
+def run_backtest(
+    close: pd.DataFrame,
+    position: pd.DataFrame,
+    total_score: pd.DataFrame = None,
+    market_close: pd.Series = None,
+) -> BacktestResult:
     """跑回測算每日策略報酬 + 成本 + KPI。"""
     log.info("計算策略每日報酬與交易成本")
 
@@ -235,17 +274,38 @@ def run_backtest(close: pd.DataFrame, position: pd.DataFrame, total_score: pd.Da
     bench_pos = pd.DataFrame(1.0 / len(valid_stocks), index=close_valid.index, columns=close_valid.columns)
     bench_ret = (bench_pos.shift(1) * daily_ret_valid).sum(axis=1).fillna(0)
 
-    # 換倉成本：pos_diff 絕對值，買+賣各半
-    pos_diff = position.diff().abs()
-    cost_per_unit = COMMISSION + TAX / 2          # 平均成本率（手續費 + 一半稅）
-    daily_cost = pos_diff.sum(axis=1) * cost_per_unit
+    # 換倉成本：pos_diff 絕對值分為買入側與賣出側，各自計費
+    # 買入側：手續費 + 滑價；賣出側：手續費 + 證交稅 + 滑價
+    pos_diff = position.diff().abs().fillna(0)
+    daily_buy_turnover  = (position.shift(1) * pos_diff * close).sum(axis=1).abs()
+    daily_sell_turnover = (position * pos_diff * close).sum(axis=1).abs()
+    daily_cost = (
+        daily_buy_turnover  * (DEFAULT_FEE_BUY  + DEFAULT_SLIPPAGE) +
+        daily_sell_turnover * (DEFAULT_FEE_SELL + DEFAULT_TAX_SELL + DEFAULT_SLIPPAGE)
+    )
     strategy_net_ret = strategy_ret - daily_cost
 
     cum_benchmark = (1 + bench_ret).cumprod()
     cum_strategy = (1 + strategy_net_ret.fillna(0)).cumprod()
 
-    # KPI
+    # KPI（提前定義 total_ret，給 market_alpha 用）
     total_ret = cum_strategy.iloc[-1] - 1
+
+    # ── 市場基準 0050 B&H（雙基準） ──
+    cum_market_0050 = None
+    market_benchmark_return = None
+    market_alpha = None
+    if market_close is not None:
+        # 對齊到策略交易日曆
+        aligned = market_close.reindex(close.index).ffill().dropna()
+        if len(aligned) > 1:
+            market_daily_ret = aligned.pct_change(fill_method=None).fillna(0)
+            cum_market_0050 = (1 + market_daily_ret).cumprod()
+            market_benchmark_return = cum_market_0050.iloc[-1] - 1
+            market_alpha = total_ret - market_benchmark_return
+            log.info(f"  0050 B&H: {market_benchmark_return:+.2%}  市場 alpha: {market_alpha:+.2%}")
+
+    # KPI 其餘
     bench_total = cum_benchmark.iloc[-1] - 1
     mdd = (cum_strategy / cum_strategy.cummax() - 1).min()
     bench_mdd = (cum_benchmark / cum_benchmark.cummax() - 1).min()
@@ -255,16 +315,18 @@ def run_backtest(close: pd.DataFrame, position: pd.DataFrame, total_score: pd.Da
     monthly_cost = daily_cost.resample('MS').sum()
 
     kpis = {
-        'total_return':     total_ret,
-        'benchmark_return': bench_total,
-        'excess_return':    total_ret - bench_total,
-        'mdd':              mdd,
-        'benchmark_mdd':    bench_mdd,
-        'sharpe':           sharpe,
-        'trading_days':     len(strategy_net_ret),
-        'rebalance_count':  int(monthly_turnover[monthly_turnover > 0].count()),  # 月換倉次數（與 log 一致）
-        'avg_monthly_turnover': monthly_turnover.mean(),
-        'total_cost':       daily_cost.sum(),
+        'total_return':           total_ret,
+        'pool_benchmark_return': bench_total,        # 池子等權重 B&H
+        'pool_excess_return':     total_ret - bench_total,  # 池子 alpha
+        'market_benchmark_return': market_benchmark_return,  # 0050 B&H（雙基準）
+        'market_alpha':           market_alpha,            # 市場 alpha
+        'mdd':                    mdd,
+        'pool_benchmark_mdd':    bench_mdd,
+        'sharpe':                 sharpe,
+        'trading_days':           len(strategy_net_ret),
+        'rebalance_count':        int(monthly_turnover[monthly_turnover > 0].count()),
+        'avg_monthly_turnover':   monthly_turnover.mean(),
+        'total_cost':             daily_cost.sum(),
     }
 
     return BacktestResult(
@@ -275,6 +337,7 @@ def run_backtest(close: pd.DataFrame, position: pd.DataFrame, total_score: pd.Da
         strategy_net_ret=strategy_net_ret,
         cum_strategy=cum_strategy,
         cum_benchmark=cum_benchmark,
+        cum_market_0050=cum_market_0050,
         selected_monthly={},
         monthly_turnover=monthly_turnover,
         monthly_cost=monthly_cost,
@@ -303,18 +366,26 @@ def run() -> BacktestResult:
     total_score, fval, fmom, fqual = compute_factors(close, pe, roe)
     position, selected = build_position(close, total_score, volume)
 
-    result = run_backtest(close, position, total_score)
+    # 抓 0050 市場基準（雙基準）
+    market_close = None
+    if MARKET_BENCHMARK:
+        market_close = fetch_0050_data(token, START_DATE, END_DATE)
+
+    result = run_backtest(close, position, total_score, market_close=market_close)
     result.selected_monthly = selected
 
     # 印 KPI
     k = result.kpis
     log.info("=" * 60)
     log.info(f"策略總報酬:   {k['total_return']:+.2%}")
-    log.info(f"B&H 對照:    {k['benchmark_return']:+.2%}")
-    log.info(f"超額報酬:    {k['excess_return']:+.2%}")
-    log.info(f"MDD:        {k['mdd']:.2%}")
-    log.info(f"Sharpe:     {k['sharpe']:.2f}")
-    log.info(f"換倉次數:   {k['rebalance_count']}")
+    log.info(f"池子 B&H:    {k['pool_benchmark_return']:+.2%}")
+    log.info(f"池子 alpha:  {k['pool_excess_return']:+.2%}")
+    if k.get('market_benchmark_return') is not None:
+        log.info(f"0050 B&H:    {k['market_benchmark_return']:+.2%}")
+        log.info(f"市場 alpha:  {k['market_alpha']:+.2%}")
+    log.info(f"MDD:         {k['mdd']:.2%}")
+    log.info(f"Sharpe:      {k['sharpe']:.2f}")
+    log.info(f"換倉次數:    {k['rebalance_count']}")
     log.info("=" * 60)
 
     return result

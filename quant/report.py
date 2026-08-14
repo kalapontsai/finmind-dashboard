@@ -16,7 +16,7 @@ from plotly.subplots import make_subplots
 
 from config import (
     COMMISSION, END_DATE, MOMENTUM_LOOKBACK, OUTPUT_DIR,
-    REPORT_FILE, RESULTS_JSON, START_DATE, STOCK_POOL, TAX, TOP_N, WEIGHTS,
+    REPORT_FILE, RESULTS_JSON, SLIPPAGE, START_DATE, STOCK_POOL, TAX, TOP_N, WEIGHTS,
 )
 
 
@@ -34,17 +34,24 @@ def build_charts(result) -> dict:
     cum_strategy = result.cum_strategy
     cum_benchmark = result.cum_benchmark
 
-    # 1. 累計淨值曲線
+    # 1. 累計淨值曲線（策略 + 雙基準 B&H）
     fig_equity = go.Figure()
     fig_equity.add_trace(go.Scatter(
         x=cum_strategy.index, y=cum_strategy.values,
         name='多因子策略', line=dict(color='#58a6ff', width=2),
         fill='tozeroy', fillcolor='rgba(88, 166, 255, 0.1)',
     ))
+    # 雙基準 B&H：池子等權重
     fig_equity.add_trace(go.Scatter(
         x=cum_benchmark.index, y=cum_benchmark.values,
-        name='Buy & Hold（股票池等權）', line=dict(color='#8b949e', width=1.5, dash='dash'),
+        name='B&H（池子等權）', line=dict(color='#8b949e', width=1.5, dash='dash'),
     ))
+    # 雙基準 B&H：0050 市場
+    if result.cum_market_0050 is not None:
+        fig_equity.add_trace(go.Scatter(
+            x=result.cum_market_0050.index, y=result.cum_market_0050.values,
+            name='B&H（0050 市場）', line=dict(color='#d29922', width=1.5, dash='dot'),
+        ))
     fig_equity.update_layout(
         title='累計淨值曲線',
         xaxis_title='日期', yaxis_title='淨值（初始 = 1.0）',
@@ -103,6 +110,23 @@ def render_html(result) -> str:
         chips = ' '.join(f'<span class="chip">{s}</span>' for s in stocks)
         selected_rows += f'<tr><td>{date_str}</td><td>{chips}</td></tr>'
 
+    # 雙基準 alpha 格式化
+    pool_alpha_val = k.get('pool_excess_return', 0)
+    market_alpha_val = k.get('market_alpha')
+    market_bench_val = k.get('market_benchmark_return')
+    pool_bench_val = k.get('pool_benchmark_return', 0)
+    market_alpha_html = ''
+    if market_alpha_val is not None and market_bench_val is not None:
+        market_alpha_html = f'''
+        <div class="kpi">
+            <div class="label">市場 alpha（vs 0050）</div>
+            <div class="value {"pos" if market_alpha_val >= 0 else "neg"}">{_fmt_pct(market_alpha_val)}</div>
+        </div>
+        <div class="kpi">
+            <div class="label">0050 B&amp;H</div>
+            <div class="value {"pos" if market_bench_val >= 0 else "neg"}">{_fmt_pct(market_bench_val)}</div>
+        </div>'''
+
     config_html = f"""
     <div class="config">
         <div class="row"><span class="lbl">回測區間</span><span>{START_DATE} ~ {END_DATE}</span></div>
@@ -110,7 +134,7 @@ def render_html(result) -> str:
         <div class="row"><span class="lbl">Top N</span><span>{TOP_N} 檔（等權 {1/TOP_N:.0%}）</span></div>
         <div class="row"><span class="lbl">動能回看</span><span>{MOMENTUM_LOOKBACK} 日</span></div>
         <div class="row"><span class="lbl">因子權重</span><span>價值 {WEIGHTS['value']:.0%} / 動能 {WEIGHTS['momentum']:.0%} / 品質 {WEIGHTS['quality']:.0%}</span></div>
-        <div class="row"><span class="lbl">手續費 / 稅</span><span>{COMMISSION:.4%} / {TAX:.3%}</span></div>
+        <div class="row"><span class="lbl">費率</span><span>買 {COMMISSION:.4%} / 賣 {COMMISSION:.4%}+{TAX:.3%} / 滑價 {SLIPPAGE:.3%}</span></div>
         <div class="row"><span class="lbl">交易日</span><span>{k['trading_days']}</span></div>
     </div>
     """
@@ -122,13 +146,14 @@ def render_html(result) -> str:
             <div class="value {'pos' if k['total_return'] >= 0 else 'neg'}">{_fmt_pct(k['total_return'])}</div>
         </div>
         <div class="kpi">
-            <div class="label">B&amp;H 對照</div>
-            <div class="value {'pos' if k['benchmark_return'] >= 0 else 'neg'}">{_fmt_pct(k['benchmark_return'])}</div>
+            <div class="label">B&amp;H（池子等權）</div>
+            <div class="value {'pos' if pool_bench_val >= 0 else 'neg'}">{_fmt_pct(pool_bench_val)}</div>
         </div>
         <div class="kpi">
-            <div class="label">超額報酬</div>
-            <div class="value {'pos' if k['excess_return'] >= 0 else 'neg'}">{_fmt_pct(k['excess_return'])}</div>
+            <div class="label">池子 alpha</div>
+            <div class="value {'pos' if pool_alpha_val >= 0 else 'neg'}">{_fmt_pct(pool_alpha_val)}</div>
         </div>
+        {market_alpha_html}
         <div class="kpi">
             <div class="label">MDD</div>
             <div class="value neg">{_fmt_pct(k['mdd'])}</div>
@@ -246,15 +271,17 @@ def save(result):
         'generated_at': datetime.now().isoformat(),
         'kpis': result.kpis,
         'selected_monthly': result.selected_monthly,
-        'cum_strategy': result.cum_strategy.reset_index().rename(columns={'index': 'date', 0: 'nav'}).to_dict('records'),
     }
-    # 修正上面的 cum_strategy 重置索引寫法（series 直接 reset_index 即可）
     cs = result.cum_strategy.reset_index()
     cs.columns = ['date', 'nav']
     cb = result.cum_benchmark.reset_index()
     cb.columns = ['date', 'nav']
     payload['cum_strategy'] = cs.to_dict('records')
     payload['cum_benchmark'] = cb.to_dict('records')
+    if result.cum_market_0050 is not None:
+        cm = result.cum_market_0050.reset_index()
+        cm.columns = ['date', 'nav']
+        payload['cum_market_0050'] = cm.to_dict('records')
 
     RESULTS_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
 

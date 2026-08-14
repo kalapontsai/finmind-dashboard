@@ -83,16 +83,21 @@ TOP_N = 5                  # 每月選出前 N 大總分
 EQUAL_WEIGHT = 0.20        # 每檔權重（1 / TOP_N）
 MIN_LIQUIDITY_SHARES = 0   # 流動性最低門檻（20 日均量，0 = 不過濾）
 
-# === 7. 交易成本 ===
-COMMISSION = 0.001425       # 手續費 0.1425%
-TAX = 0.003                 # 證交稅 0.3%（賣出）
+# === 7. 交易成本（已移至 lib/cost.py；這裡保留供 report.py 向後相容）===
+COMMISSION = 0.001425       # 買入手續費 0.1425%（僅供顯示用，實際計算見 lib/cost.py）
+TAX = 0.003                 # 賣出證交稅 0.3%（僅供顯示用）
+SLIPPAGE = 0.001            # 滑價 0.1%（僅供顯示用）
 
-# === 8. 報表輸出 ===
+# === 8. 市場基準 ===
+# 雙基準 B&H：股票池等權重（pool） + 市場 ETF（market）
+MARKET_BENCHMARK = '0050'   # None = 不顯示市場基準
+
+# === 9. 報表輸出 ===
 OUTPUT_DIR = Path(__file__).parent / 'output'
 OUTPUT_DIR.mkdir(exist_ok=True)
 REPORT_FILE = OUTPUT_DIR / 'report.html'
 RESULTS_JSON = OUTPUT_DIR / 'backtest_results.json'
 
-# === 9. Buy & Hold 對照基準 ===
+# === 10. Buy & Hold 對照基準（已整合進 MARKET_BENCHMARK）===
 # 不指定 → 用股票池等權重
-BENCHMARK_POOL = None   # 例如 ['0050'] 表用 0050 當對照；None = 股票池等權重
+BENCHMARK_POOL = None   # 例如 ['0050'] 表用 0050 當對照；None = 股票池等權重（僅向後相容）

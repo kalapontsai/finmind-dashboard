@@ -32,7 +32,7 @@ from app_config import (
 from lib import finmind as fm
 from lib.backtest import run_backtest, save_backtest_summary
 from lib.finmind import FinMindClient, FinMindError
-from lib.quant_runner import get_status, run_quant
+from lib.quant_runner import get_status, run_quant, run_quant_async
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -406,19 +406,25 @@ def backtest():
         return _err(f'回測失敗：{e}', 500)
 
 
-# ────────────────────────── 量化回測 ──────────────────────────
+# ────────────────────────── 量化回測（非同步，支援 polling）─────────────────────────
 @api_bp.post('/quant_run')
 def quant_run():
+    """非同步版本：立即回 job_id，背景跑回測。"""
     err = _require_token()
     if err:
         return err
-    result = run_quant()
+    result = run_quant_async()
     return jsonify(result)
 
 
 @api_bp.get('/quant_status')
 def quant_status():
-    return jsonify(get_status())
+    """
+    GET /api/quant_status           → 同步版最後狀態（向後相容）
+    GET /api/quant_status?job_id=xxx → 非同步 job 進度
+    """
+    job_id = request.args.get('job_id') or None
+    return jsonify(get_status(job_id=job_id))
 
 
 @api_bp.get('/quant_pool')

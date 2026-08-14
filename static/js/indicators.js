@@ -146,3 +146,28 @@ const ChartDefaults = {
 Chart.defaults.color = ChartDefaults.color;
 Chart.defaults.borderColor = ChartDefaults.grid;
 Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+/**
+ * chartjs-plugin-zoom 全域預設
+ * - 滑鼠滾輪：zoom in/out
+ * - 雙擊：reset
+ * - 不啟用 drag pan（避免跟 tooltip hover 衝突）
+ * - 各 chart 可在 options.plugins.zoom.zoom.drag 啟用框選 zoom
+ */
+if (window.Chart && Chart.defaults.plugins?.zoom !== undefined) {
+    Chart.defaults.plugins.zoom = {
+        zoom: {
+            wheel: { enabled: true, speed: 0.1 },
+            pinch: { enabled: true },
+            drag:  { enabled: false },   // 不啟用，避免破壞 tooltip
+            mode: 'x',
+        },
+        pan: {
+            enabled: false,
+            mode: 'x',
+        },
+        limits: {
+            x: { minRange: 5 },          // 最少顯示 5 個交易日
+        },
+    };
+}

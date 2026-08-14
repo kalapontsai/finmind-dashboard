@@ -4,6 +4,7 @@
 - AND / OR 觸發模式
 - 頻率：每日 / 每月指定日期
 - 每次觸發「全部現金買入」或「全部庫存賣出」（不支援部位管理）
+- 交易成本：lib/cost.py 統一計算（台股費率：買 0.1425% / 賣 0.1425%+0.3% 證交稅 / 滑價 0.1%）
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app_config import BACKTEST_RESULTS_FILE, BACKTEST_RESULTS_MAX
+from .cost import buy_amount, sell_amount, DEFAULT_FEE_BUY, DEFAULT_FEE_SELL, DEFAULT_TAX_SELL, DEFAULT_SLIPPAGE
 
 
 # ────────────────────────── 指標計算 ──────────────────────────
@@ -130,6 +132,10 @@ def run_backtest(
     combine_mode: str = 'OR',
     frequency: str = 'day',
     month_day: int = 15,
+    fee_buy: float = DEFAULT_FEE_BUY,
+    fee_sell: float = DEFAULT_FEE_SELL,
+    tax_sell: float = DEFAULT_TAX_SELL,
+    slippage: float = DEFAULT_SLIPPAGE,
 ) -> dict:
     """
     執行回測
@@ -147,6 +153,10 @@ def run_backtest(
         combine_mode: 'OR' 或 'AND'
         frequency: 'day' 或 'month'
         month_day: 1-31 (frequency=month 才有)
+        fee_buy:   買入手續費率（預設 0.001425）
+        fee_sell:  賣出手續費率（預設 0.001425）
+        tax_sell:  賣出證交稅率（預設 0.003）
+        slippage:  滑價率（預設 0.001）
 
     Returns:
         dict: 完整回測結果
@@ -263,25 +273,31 @@ def run_backtest(
 
     init_buy_hold_shares = int(math.floor(capital / closes[0]))
 
+    cost_kwargs = dict(fee_buy=fee_buy, fee_sell=fee_sell, tax_sell=tax_sell, slippage=slippage)
+
     for i in range(n):
         price = closes[i]
         is_action_day = i in action_set
 
         if is_action_day and final_buy[i] and shares == 0 and cash > 0:
-            qty = int(math.floor(cash / price))
+            qty, actual_cost = buy_amount(cash, price, **cost_kwargs)
             if qty > 0:
-                cost = qty * price
-                cash -= cost
+                cash -= actual_cost
                 shares += qty
                 trades.append({
                     'date': dates[i],
                     'action': 'BUY',
                     'price': price,
                     'qty': qty,
-                    'amount': cost,
+                    'amount': actual_cost,
+                    'cost_breakdown': {
+                        'gross_turnover': qty * price * (1 + slippage),
+                        'fee': qty * price * fee_buy,
+                        'slippage': qty * price * slippage,
+                    },
                 })
         elif is_action_day and final_sell[i] and shares > 0:
-            proceeds = shares * price
+            proceeds, actual_cost = sell_amount(shares, price, **cost_kwargs)
             cash += proceeds
             trades.append({
                 'date': dates[i],
@@ -289,6 +305,12 @@ def run_backtest(
                 'price': price,
                 'qty': shares,
                 'amount': proceeds,
+                'cost_breakdown': {
+                    'gross_turnover': shares * price * (1 - slippage),
+                    'fee': shares * price * fee_sell,
+                    'tax': shares * price * tax_sell,
+                    'slippage': shares * price * slippage,
+                },
             })
             shares = 0
 

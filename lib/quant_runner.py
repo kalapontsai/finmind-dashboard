@@ -94,10 +94,14 @@ def _write_progress(job_id: str, status: str, progress_pct: int,
 
 # ────────────────────────── 非同步 job（thread 版，用於 Flask 內直接跑） ──────────────────────────
 
-def run_quant_async() -> dict:
+def run_quant_async(**kwargs) -> dict:
     """
     非同步版本：立即回 job_id，背景執行。
     使用 threading 在 Flask 行程內跑（避免 subprocess 開銷）。
+
+    Args:
+        **kwargs: 傳給 quant.runner.run() 的設定覆寫
+            （strategies, start, end, top_n, fee_buy, fee_sell, tax_sell, slippage, ...）
 
     Returns:
         { ok: True, job_id: str }
@@ -116,8 +120,8 @@ def run_quant_async() -> dict:
     def _run():
         try:
             _write_progress(job_id, 'running', 5, '啟動')
-            import quant.quant as q
-            result = q.run()
+            from quant.runner import run as runner_run
+            result = runner_run(kwargs if kwargs else None)
 
             # 寫入結果
             from quant.report import save

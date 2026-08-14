@@ -65,8 +65,8 @@ const FinMindAPI = {
         return this.post('backtest', params);
     },
 
-    quantRun() {
-        return this.post('quant_run', {});
+    quantRun(params) {
+        return this.post('quant_run', params || {});
     },
 
     quantStatus() {
@@ -75,5 +75,13 @@ const FinMindAPI = {
 
     quantPool() {
         return this.get('quant_pool');
+    },
+
+    strategiesList() {
+        return this.get('strategies');
+    },
+
+    strategiesSaveConfig(strategies) {
+        return this.post('strategies/config', { strategies });
     },
 };

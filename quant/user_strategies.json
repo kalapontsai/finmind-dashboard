@@ -1,0 +1,20 @@
+{
+  "strategies": [
+    {
+      "name": "value",
+      "enabled": true,
+      "weight": 0.4
+    },
+    {
+      "name": "momentum",
+      "enabled": true,
+      "weight": 0.3
+    },
+    {
+      "name": "quality",
+      "enabled": true,
+      "weight": 0.3
+    }
+  ],
+  "updated_at": "2026-08-14T15:08:58+00:00"
+}

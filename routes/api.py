@@ -33,6 +33,8 @@ from lib import finmind as fm
 from lib.backtest import run_backtest, save_backtest_summary
 from lib.finmind import FinMindClient, FinMindError
 from lib.quant_runner import get_status, run_quant, run_quant_async
+from lib.strategy_store import list_strategies
+from lib.user_strategy_config import load as load_user_strategy_config, save as save_user_strategy_config
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -409,11 +411,26 @@ def backtest():
 # ────────────────────────── 量化回測（非同步，支援 polling）─────────────────────────
 @api_bp.post('/quant_run')
 def quant_run():
-    """非同步版本：立即回 job_id，背景跑回測。"""
+    """非同步版本：立即回 job_id，背景跑回測。
+    Body（可選）:
+        {
+            'strategies': [{name, weight}, ...],
+            'start': 'YYYY-MM-DD',
+            'end': 'YYYY-MM-DD',
+            'top_n': int,
+            'fee_buy': float, 'fee_sell': float,
+            'tax_sell': float, 'slippage': float,
+        }
+    """
     err = _require_token()
     if err:
         return err
-    result = run_quant_async()
+    body = request.get_json(silent=True) or {}
+    # 過濾掉 None 值避免覆蓋 runner 預設
+    kwargs = {k: v for k, v in body.items() if v is not None and k != 'strategies'}
+    if 'strategies' in body and body['strategies']:
+        kwargs['strategies'] = body['strategies']
+    result = run_quant_async(**kwargs)
     return jsonify(result)
 
 
@@ -449,6 +466,75 @@ def quant_pool():
         '2884', '2885', '2886', '2887', '2891', '3008', '3034', '3711',
     ]
     return jsonify({'count': len(default_pool), 'stocks': default_pool})
+
+
+# ────────────────────────── 量化策略（參數 + 使用者啟用/權重）─────────────────────────
+@api_bp.get('/strategies')
+def strategies_list():
+    """
+    GET /api/strategies
+    回傳所有量化策略的：
+      - meta：name / type / schema_version / updated_at
+      - params：純因子參數（從 strategies/params/<name>.json 讀）
+      - user_config：使用者在 UI 設的 enabled / weight（從 user_strategies.json 讀）
+    """
+    metas = list_strategies()  # [{name, type, schema_version, updated_at}]
+    user_cfg = load_user_strategy_config()
+    user_map = {s['name']: s for s in user_cfg.get('strategies', [])}
+
+    items = []
+    from lib.strategy_store import load as _store_load
+    for meta in metas:
+        name = meta['name']
+        params: dict = {}
+        try:
+            full = _store_load(name)
+            params = full.get('params', {}) or {}
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
+        u = user_map.get(name, {'enabled': True, 'weight': 0.0})
+        items.append({
+            'name': name,
+            'type': meta.get('type', name),
+            'schema_version': meta.get('schema_version', 1),
+            'updated_at': meta.get('updated_at'),
+            'params': params,
+            'enabled': bool(u.get('enabled', True)),
+            'weight': float(u.get('weight', 0)),
+        })
+
+    return jsonify({
+        'count': len(items),
+        'strategies': items,
+        'user_updated_at': user_cfg.get('updated_at'),
+    })
+
+
+@api_bp.post('/strategies/config')
+def strategies_config_save():
+    """
+    POST /api/strategies/config
+    Body: { strategies: [{ name, enabled, weight }, ...] }
+    儲存使用者的啟用與權重設定。
+    """
+    body = request.get_json(silent=True) or {}
+    strategies = body.get('strategies')
+    if not isinstance(strategies, list):
+        return _err('strategies must be a list')
+
+    try:
+        saved = save_user_strategy_config(strategies)
+    except Exception as e:
+        return _err(f'儲存失敗：{e}', 500)
+
+    return jsonify({
+        'ok': True,
+        'strategies': saved['strategies'],
+        'updated_at': saved['updated_at'],
+    })
 
 
 # ────────────────────────── 健康檢查 ──────────────────────────

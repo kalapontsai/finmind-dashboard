@@ -185,7 +185,7 @@ def compute_factors(close: pd.DataFrame, pe: pd.DataFrame, roe: pd.DataFrame) ->
     return total_score, factor_val, factor_mom, factor_qual
 
 
-def build_position(close: pd.DataFrame, total_score: pd.DataFrame, volume: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+def build_position(close: pd.DataFrame, total_score: pd.DataFrame, volume: pd.DataFrame, rebalance_freq: str = 'monthly') -> tuple[pd.DataFrame, dict]:
     """每月第一個交易日依總分選出 Top N，建持倉矩陣。"""
     log.info(f"每月選股 Top {TOP_N}，等權重 {EQUAL_WEIGHT:.0%}")
 
@@ -197,26 +197,39 @@ def build_position(close: pd.DataFrame, total_score: pd.DataFrame, volume: pd.Da
     liq_filter = volume.rolling(20).mean() >= MIN_LIQUIDITY_SHARES if MIN_LIQUIDITY_SHARES > 0 else pd.DataFrame(True, index=volume.index, columns=volume.columns)
     valid_score = total_score.where(liq_filter)
 
-    # 每月第一個交易日（用 close.index 處理 datetime mismatch）
-    monthly_dates = pd.DatetimeIndex(close.index).to_period('M').drop_duplicates().to_timestamp().normalize()
-    # 取每月該月內第一個交易日（與 close 重疊的那一天）
+    # 計算換倉日期（依 rebalance_freq）
     available = pd.DatetimeIndex(close.index)
-    actual_monthly = []
-    for m_start in monthly_dates:
-        mask = (available >= m_start) & (available < m_start + pd.offsets.MonthBegin(1))
-        if mask.any():
-            actual_monthly.append(available[mask][0])
+    rebalance_dates: list = []
+    if rebalance_freq == 'quarterly':
+        # 每季（3/6/9/12 月）第一個交易日
+        period_dates = pd.DatetimeIndex(close.index).to_period('Q').drop_duplicates().to_timestamp().normalize()
+        for p_start in period_dates:
+            mask = (available >= p_start) & (available < p_start + pd.offsets.QuarterBegin(1))
+            if mask.any():
+                rebalance_dates.append(available[mask][0])
+        log.info(f"換倉頻率: 每季 ({len(rebalance_dates)} 次)")
+    elif rebalance_freq == 'daily':
+        # 每日（最貴但可選）
+        rebalance_dates = list(available)
+        log.info(f"換倉頻率: 每日 ({len(rebalance_dates)} 次)")
+    else:  # monthly（預設）
+        monthly_dates = pd.DatetimeIndex(close.index).to_period('M').drop_duplicates().to_timestamp().normalize()
+        for m_start in monthly_dates:
+            mask = (available >= m_start) & (available < m_start + pd.offsets.MonthBegin(1))
+            if mask.any():
+                rebalance_dates.append(available[mask][0])
+        log.info(f"換倉頻率: 每月 ({len(rebalance_dates)} 次)")
 
     position = pd.DataFrame(0.0, index=close.index, columns=close.columns)
     selected = {}
-    for d in actual_monthly:
+    for d in rebalance_dates:
         if d not in valid_score.index:
             continue
         row = valid_score.loc[d].dropna()
         if len(row) == 0:
             continue
         top = row.nlargest(min(TOP_N, len(row))).index.tolist()
-        # 從 d 當天開始持倉（每月第一個交易日買進）
+        # 從 d 當天開始持倉
         position.loc[d:, top] = EQUAL_WEIGHT
         selected[d.strftime('%Y-%m-%d')] = top
 

@@ -20,6 +20,7 @@ env/
 quant/cache/
 quant/output/
 quant/data/
+quant/progress/
 
 # ===== 一般備用 =====
 *.log

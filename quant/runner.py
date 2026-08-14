@@ -130,12 +130,42 @@ def load_strategies(strategies_cfg: list[dict]) -> list:
     return instances
 
 
-def combine_scores(strategy_results: list, weights: dict[str, float]) -> pd.DataFrame:
+def _zscore_standardize(score: pd.DataFrame) -> pd.DataFrame:
+    """
+    對每個時間點（row）橫斷面 z-score 標準化：(x - mean) / std
+    - NaN 不參與 mean/std 計算，標準化後仍 NaN
+    - 若該 row 全為 NaN 或 std=0，回 NaN / 0
+    """
+    mean = score.mean(axis=1)
+    std = score.std(axis=1)
+    # 避免除以 0
+    std = std.replace(0, np.nan)
+    standardized = score.sub(mean, axis=0).div(std, axis=0)
+    return standardized
+
+
+def combine_scores(
+    strategy_results: list,
+    weights: dict[str, float],
+    standardize: str = 'rank',
+) -> pd.DataFrame:
     """
     加權組合各 strategy 的排名矩陣。
-    - NaN 在該 strategy 內記為 0（不參與排名）
-    - 採直接加權（與舊 quant.py 相容）：total = sum(score_i * weight_i)
+
+    Args:
+        strategy_results: list of StrategyResult
+        weights: {strategy_type: weight}
+        standardize: 'rank' (預設，向後相容) 或 'zscore'
+            - 'rank': 直接加權（與舊 quant.py 相容）；NaN → 0
+            - 'zscore': 每個 strategy 先 z-score 標準化（mean=0, std=1），
+              再加權組合成 total_score
+
+    Returns:
+        DataFrame (Index=date, Columns=stock_id)，加權後的綜合分數
     """
+    if standardize not in ('rank', 'zscore'):
+        raise ValueError(f'standardize 必須是 rank 或 zscore, got {standardize!r}')
+
     score_df = None
 
     for sr in strategy_results:
@@ -143,7 +173,15 @@ def combine_scores(strategy_results: list, weights: dict[str, float]) -> pd.Data
         if w == 0:
             continue
 
-        masked = sr.score.fillna(0)
+        if standardize == 'zscore':
+            # 先 z-score 標準化（NaN 不參與計算）
+            score_use = _zscore_standardize(sr.score)
+            # NaN → 0 加權（參與綜合分數計算）
+            masked = score_use.fillna(0)
+        else:
+            # rank 模式：直接 NaN → 0 加權
+            masked = sr.score.fillna(0)
+
         if score_df is None:
             score_df = masked * w
         else:
@@ -217,7 +255,11 @@ def run(user_cfg: dict | None = None):
         strategy_results.append(result)
 
     # ── 7. 加權組合 ──
-    total_score = combine_scores(strategy_results, weights)
+    total_score = combine_scores(
+        strategy_results,
+        weights,
+        standardize=cfg.get('standardize', 'rank'),
+    )
 
     # ── 8. 建持倉 + 抓 0050 ──
     position, selected = build_position(

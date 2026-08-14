@@ -53,8 +53,13 @@ class BacktestResult:
     kpis: dict
 
 
-def fetch_data(token: str, stock_list: list[str], start: str, end: str, use_cache: bool = True):
-    """用 FinMind.DataLoader 逐檔同步抓資料（帶磁碟快取 + retry）。
+def fetch_data(token: str, stock_list: list[str], start: str, end: str, use_cache: bool = True, cache_stale_days: int = 7):
+    """用 FinMind.DataLoader 逐檔同步抓資料（帶 per-stock 快取 + retry + staleness）。
+
+    快取策略（P3-7）:
+    - 每個 (dataset_name, stock_id) 一個 parquet 檔
+    - 池子變動 / 日期變動不會整批失效，只重抓需要的股票
+    - 超過 cache_stale_days 天的快取視為 stale，強制重抓
 
     注意：
     - 同 IP 使用多 token 會導致多個 token 都被封鎖 → 只用一個 token
@@ -63,17 +68,30 @@ def fetch_data(token: str, stock_list: list[str], start: str, end: str, use_cach
     import time
 
     CACHE_DIR.mkdir(exist_ok=True)
-    cache_key = f"{'-'.join(sorted(stock_list))}_{start}_{end}".replace('/', '_').replace(' ', '_')[:120]
+    stale_seconds = cache_stale_days * 86400
+
+    def _is_stale(path: Path) -> bool:
+        if not path.exists():
+            return True
+        age = time.time() - path.stat().st_mtime
+        return age > stale_seconds
 
     def _fetch_with_retry(name, fetch_fn_single, max_retry=3):
-        cache_path = CACHE_DIR / f"{name}_{cache_key}.parquet"
-        if use_cache and cache_path.exists():
-            log.info(f"  {name} 讀快取：{cache_path.name}")
-            return pd.read_parquet(cache_path)
-
         all_dfs = []
         skipped = []
+        fetched = 0
+        cached = 0
+
         for stock_id in stock_list:
+            cache_path = CACHE_DIR / f"{name}_{stock_id}.parquet"
+            if use_cache and cache_path.exists() and not _is_stale(cache_path):
+                try:
+                    all_dfs.append(pd.read_parquet(cache_path))
+                    cached += 1
+                    continue
+                except Exception:
+                    pass  # cache 壞了重抓
+
             for attempt in range(max_retry):
                 try:
                     dl = DataLoader()
@@ -82,8 +100,13 @@ def fetch_data(token: str, stock_list: list[str], start: str, end: str, use_cach
                     if df is None or df.empty:
                         log.info(f"  [{name}/{stock_id}] 無資料（跳過）")
                         skipped.append(stock_id)
-                        break    # 跳過這個股票但不報錯
+                        break
                     all_dfs.append(df)
+                    try:
+                        df.to_parquet(cache_path)
+                        fetched += 1
+                    except Exception:
+                        pass  # 寫 cache 失敗不影響結果
                     break
                 except Exception as e:
                     err = str(e).lower()
@@ -94,15 +117,14 @@ def fetch_data(token: str, stock_list: list[str], start: str, end: str, use_cach
                         time.sleep(wait)
                     else:
                         raise
-            time.sleep(0.5)
+            time.sleep(0.3)
 
+        log.info(f"  {name}: cache={cached}, 新抓={fetched}, 跳過={len(skipped)}")
         if not all_dfs:
             raise RuntimeError(f"{name} 全部回傳空")
         if skipped:
             log.warning(f"  {name} 跳過 {len(skipped)} 檔無資料股票：{skipped}")
-        df_combined = pd.concat(all_dfs, ignore_index=True)
-        df_combined.to_parquet(cache_path)
-        return df_combined
+        return pd.concat(all_dfs, ignore_index=True)
 
     log.info(f"抓取股價 ({len(stock_list)} 檔, {start} ~ {end})")
     df_price = _fetch_with_retry(

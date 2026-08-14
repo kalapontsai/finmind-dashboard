@@ -219,6 +219,11 @@ th {{ color: #8b949e; font-weight: 600; background: #21262d; position: sticky; t
     <h1>FinMind 多因子回測報告</h1>
     <div class="subtitle">產生時間 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
 
+    <div style="background:rgba(210, 153, 34, 0.15); border:1px solid #d29922; border-radius:6px; padding:10px 14px; margin:8px 0 20px 0; font-size:13px; color:#d29922;">
+        ⚠ <strong>未含息報酬</strong>：本回測未計入現金股利 / 股票股利 / 除權息調整。
+        實際長期持有報酬會高於本報表顯示的價格報酬。未來將整合 <code>TaiwanStockDividend</code> 計算含息總報酬。
+    </div>
+
     <div class="card">
         <div class="card-title">回測設定</div>
         {config_html}

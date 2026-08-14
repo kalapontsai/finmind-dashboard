@@ -337,8 +337,11 @@ def run_backtest(
         if len(excess_daily) > 1 and excess_daily.std() > 0:
             information_ratio = (excess_daily.mean() * 252) / (excess_daily.std() * np.sqrt(252))
 
-    monthly_turnover = position.diff().abs().sum(axis=1).resample('MS').sum()
+    monthly_turnover = (position.diff().abs().sum(axis=1).resample('MS').sum() / 2)
     monthly_cost = daily_cost.resample('MS').sum()
+    # 年化換手率 = 平均月換倉 × 12 ÷ 平均持倉股數
+    avg_position_size = position.sum(axis=1).mean()
+    annual_turnover = (monthly_turnover.mean() * 12) / avg_position_size if avg_position_size > 0 else None
 
     kpis = {
         'total_return':           total_ret,
@@ -353,6 +356,7 @@ def run_backtest(
         'trading_days':           len(strategy_net_ret),
         'rebalance_count':        int(monthly_turnover[monthly_turnover > 0].count()),
         'avg_monthly_turnover':   monthly_turnover.mean(),
+        'annual_turnover':        annual_turnover,
         'total_cost':             daily_cost.sum(),
     }
 

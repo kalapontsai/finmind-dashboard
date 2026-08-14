@@ -26,6 +26,7 @@ quant/data/
 *.swp
 .DS_Store
 Thumbs.db
+logs/
 
 # 保留 data/.gitkeep（讓 data/ 進版本）
 !.gitkeep

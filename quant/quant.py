@@ -312,6 +312,7 @@ def run_backtest(
     cum_market_0050 = None
     market_benchmark_return = None
     market_alpha = None
+    market_daily_ret = None
     if market_close is not None:
         # 對齊到策略交易日曆
         aligned = market_close.reindex(close.index).ffill().dropna()
@@ -328,6 +329,14 @@ def run_backtest(
     bench_mdd = (cum_benchmark / cum_benchmark.cummax() - 1).min()
     sharpe = (strategy_net_ret.mean() * 252) / (strategy_net_ret.std() * np.sqrt(252)) if strategy_net_ret.std() > 0 else 0
 
+    # IR (Information Ratio) = 年化超額報酬 / 年化 tracking error
+    # 用 0050 作為市場基準；對齊交易日曆
+    information_ratio = None
+    if market_daily_ret is not None and len(market_daily_ret) > 1:
+        excess_daily = (strategy_net_ret - market_daily_ret).dropna()
+        if len(excess_daily) > 1 and excess_daily.std() > 0:
+            information_ratio = (excess_daily.mean() * 252) / (excess_daily.std() * np.sqrt(252))
+
     monthly_turnover = position.diff().abs().sum(axis=1).resample('MS').sum()
     monthly_cost = daily_cost.resample('MS').sum()
 
@@ -340,6 +349,7 @@ def run_backtest(
         'mdd':                    mdd,
         'pool_benchmark_mdd':    bench_mdd,
         'sharpe':                 sharpe,
+        'information_ratio':     information_ratio,         # IR vs 0050
         'trading_days':           len(strategy_net_ret),
         'rebalance_count':        int(monthly_turnover[monthly_turnover > 0].count()),
         'avg_monthly_turnover':   monthly_turnover.mean(),

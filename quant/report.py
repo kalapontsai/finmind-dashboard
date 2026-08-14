@@ -135,6 +135,7 @@ def render_html(result) -> str:
         <div class="row"><span class="lbl">動能回看</span><span>{MOMENTUM_LOOKBACK} 日</span></div>
         <div class="row"><span class="lbl">因子權重</span><span>價值 {WEIGHTS['value']:.0%} / 動能 {WEIGHTS['momentum']:.0%} / 品質 {WEIGHTS['quality']:.0%}</span></div>
         <div class="row"><span class="lbl">費率</span><span>買 {COMMISSION:.4%} / 賣 {COMMISSION:.4%}+{TAX:.3%} / 滑價 {SLIPPAGE:.3%}</span></div>
+        <div class="row"><span class="lbl">除權息調整</span><span>{getattr(result, 'adjust_method', 'none')}</span></div>
         <div class="row"><span class="lbl">交易日</span><span>{k['trading_days']}</span></div>
     </div>
     """
@@ -219,10 +220,16 @@ th {{ color: #8b949e; font-weight: 600; background: #21262d; position: sticky; t
     <h1>FinMind 多因子回測報告</h1>
     <div class="subtitle">產生時間 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
 
-    <div style="background:rgba(210, 153, 34, 0.15); border:1px solid #d29922; border-radius:6px; padding:10px 14px; margin:8px 0 20px 0; font-size:13px; color:#d29922;">
-        ⚠ <strong>未含息報酬</strong>：本回測未計入現金股利 / 股票股利 / 除權息調整。
-        實際長期持有報酬會高於本報表顯示的價格報酬。未來將整合 <code>TaiwanStockDividend</code> 計算含息總報酬。
-    </div>
+    {('<div style="background:rgba(63, 185, 80, 0.15); border:1px solid #3fb950; border-radius:6px; padding:10px 14px; margin:8px 0 20px 0; font-size:13px; color:#3fb950;">'
+      '✓ <strong>含息總報酬</strong>：已套用 <code>TaiwanStockDividend</code> 資料，'
+      '採用 <code>' + getattr(result, 'adjust_method', 'none') + '</code> 調整方式，'
+      '現金股利與股票股利皆計入報酬。'
+      '</div>') if getattr(result, 'include_dividends', False) else (
+      '<div style="background:rgba(210, 153, 34, 0.15); border:1px solid #d29922; border-radius:6px; padding:10px 14px; margin:8px 0 20px 0; font-size:13px; color:#d29922;">'
+      '⚠ <strong>未含息報酬</strong>：本回測未計入現金股利 / 股票股利 / 除權息調整。'
+      '實際長期持有報酬會高於本報表顯示的價格報酬。'
+      '</div>'
+    )}
 
     <div class="card">
         <div class="card-title">回測設定</div>

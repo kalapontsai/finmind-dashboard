@@ -51,15 +51,20 @@ class BacktestResult:
     monthly_turnover: pd.Series
     monthly_cost: pd.Series
     kpis: dict
+    include_dividends: bool = False   # v1.4：是否含息報酬
+    adjust_method: str = 'none'      # v1.4：除權息調整方式
 
 
-def fetch_data(token: str, stock_list: list[str], start: str, end: str, use_cache: bool = True, cache_stale_days: int = 7):
+def fetch_data(token: str, stock_list: list[str], start: str, end: str, use_cache: bool = True, cache_stale_days: int = 7, include_dividends: bool = False):
     """用 FinMind.DataLoader 逐檔同步抓資料（帶 per-stock 快取 + retry + staleness）。
 
     快取策略（P3-7）:
     - 每個 (dataset_name, stock_id) 一個 parquet 檔
     - 池子變動 / 日期變動不會整批失效，只重抓需要的股票
     - 超過 cache_stale_days 天的快取視為 stale，強制重抓
+
+    v1.4 新增：
+    - include_dividends=True 時多抓 TaiwanStockDividend（回傳值加 df_div）
 
     注意：
     - 同 IP 使用多 token 會導致多個 token 都被封鎖 → 只用一個 token
@@ -151,11 +156,34 @@ def fetch_data(token: str, stock_list: list[str], start: str, end: str, use_cach
     )
     log.info(f"  → {len(df_fin)} rows, {df_fin['stock_id'].nunique()} 檔")
 
-    return df_price, df_per, df_fin
+    df_div = None
+    if include_dividends:
+        time.sleep(2)
+        log.info("抓取除權息資料（TaiwanStockDividend）")
+        df_div = _fetch_with_retry(
+            'div',
+            lambda dl, sid: dl.taiwan_stock_dividend(stock_id=sid, start_date=start, end_date=end),
+        )
+        # 只保留有除權息事件的股票（避免空表 concat 問題）
+        if df_div is not None and not df_div.empty:
+            # 過濾掉全為 NaN 的事件欄位
+            cash_cols = ['CashEarningsDistribution', 'StockEarningsDistribution']
+            keep = df_div[
+                df_div[cash_cols].notna().any(axis=1)
+            ]
+            log.info(f"  → {len(keep)} 筆除權息事件，{keep['stock_id'].nunique()} 檔")
+            df_div = keep.reset_index(drop=True)
+
+    return df_price, df_per, df_fin, df_div
 
 
-def build_wide_tables(df_price: pd.DataFrame, df_per: pd.DataFrame, df_fin: pd.DataFrame):
-    """把長表 pivot 為寬表（Index=date, Columns=stock_id）。"""
+def build_wide_tables(df_price: pd.DataFrame, df_per: pd.DataFrame, df_fin: pd.DataFrame, df_div: pd.DataFrame | None = None, adjust_method: str = 'backward'):
+    """把長表 pivot 為寬表（Index=date, Columns=stock_id）。
+
+    v1.4 新增：
+    - df_div 不為 None 時，對 close 套用除權息調整（backward / forward / none）
+    - 預設 backward（學術標準）
+    """
     log.info("建寬表")
 
     close = df_price.pivot(index='date', columns='stock_id', values='close').astype(float)
@@ -165,6 +193,10 @@ def build_wide_tables(df_price: pd.DataFrame, df_per: pd.DataFrame, df_fin: pd.D
     # 清理：close 0 代表該日沒交易或資料缺失 → 轉 NaN，避免 pct_change 出現 inf
     close = close.replace(0, np.nan)
     log.info(f"  清理 close 0 值後有 NaN: {close.isna().sum().sum()} cells")
+
+    # 除權息調整（v1.4）
+    if df_div is not None and not df_div.empty and adjust_method != 'none':
+        close = adjust_close_for_dividends(close, df_div, method=adjust_method)
 
     # ROE = IncomeAfterTaxes / EquityAttributableToOwnersOfParent
     log.info("計算 ROE（淨利 / 歸屬母公司權益）")
@@ -183,6 +215,107 @@ def build_wide_tables(df_price: pd.DataFrame, df_per: pd.DataFrame, df_fin: pd.D
 
     log.info(f"close shape: {close.shape}, pe shape: {pe.shape}, roe shape: {roe.shape}")
     return close, volume, pe, roe
+
+
+def adjust_close_for_dividends(close: pd.DataFrame, df_div: pd.DataFrame, method: str = 'backward') -> pd.DataFrame:
+    """除權息調整股價（v1.4）
+
+    Args:
+        close: 寬表（Index=date, Columns=stock_id）
+        df_div: TaiwanStockDividend 長表（必含欄位：stock_id,
+                CashExDividendTradingDate / StockExDividendTradingDate,
+                CashEarningsDistribution / StockEarningsDistribution）
+        method: 'backward' / 'forward' / 'none'
+            - backward（預設，學術標準）:
+              F = P[ex] / (P[ex] + cash_div) × 1/(1 + stock_div_ratio)
+              對 ex-date 之前的 close 乘上 F（由舊到新累計）
+              → 累積報酬含息，ex-day 當日報酬約略為 0（因為股價已跌但有股利）
+            - forward:
+              F = (P[ex] + cash_div) / P[ex] × (1 + stock_div_ratio)
+              對 ex-date 之後的 close 乘上 F
+              → 維持當前價格為準
+            - none: 不調整
+
+    Returns:
+        調整後的 close（DataFrame，Index/Columns 同 close）
+    """
+    if method == 'none' or df_div is None or df_div.empty:
+        return close.copy()
+
+    if method not in ('backward', 'forward'):
+        raise ValueError(f"adjust_method 必須是 backward / forward / none, got {method!r}")
+
+    # 台股面額（股票股利需除以面額才變成實際比率）
+    PAR_VALUE = 10
+
+    log.info(f"除權息調整（{method}）：{df_div['stock_id'].nunique()} 檔、{len(df_div)} 事件")
+    close_adj = close.copy()
+
+    # 確保 index 是 datetime（FinMind 回傳的 date 是字串）
+    close_adj.index = pd.to_datetime(close_adj.index)
+
+    # 預先將 date 欄轉 datetime
+    df_div = df_div.copy()
+    df_div['CashExDividendTradingDate'] = pd.to_datetime(df_div['CashExDividendTradingDate'], errors='coerce')
+    df_div['StockExDividendTradingDate'] = pd.to_datetime(df_div['StockExDividendTradingDate'], errors='coerce')
+
+    for sid in close_adj.columns:
+        sid_div = df_div[df_div['stock_id'] == sid]
+        if sid_div.empty:
+            continue
+
+        # 合併除息 / 除權事件（若同日，cash + stock 同事件）
+        events = {}  # ex_date → {cash, stock}
+        for _, row in sid_div.iterrows():
+            cash_div = float(row.get('CashEarningsDistribution', 0) or 0)
+            stock_div = float(row.get('StockEarningsDistribution', 0) or 0)
+            cash_ex = row.get('CashExDividendTradingDate')
+            stock_ex = row.get('StockExDividendTradingDate')
+
+            if pd.notna(cash_ex) and cash_div > 0:
+                d = cash_ex
+                events.setdefault(d, {'cash': 0.0, 'stock': 0.0})
+                events[d]['cash'] += cash_div
+            if pd.notna(stock_ex) and stock_div > 0:
+                d = stock_ex
+                events.setdefault(d, {'cash': 0.0, 'stock': 0.0})
+                events[d]['stock'] += stock_div
+
+        if not events:
+            continue
+
+        # 對齊到交易日曆（ex-date 若非交易日，移到下一個交易日）
+        for ex_date in sorted(events.keys()):
+            ex_date = pd.Timestamp(ex_date)
+            if ex_date in close_adj.index:
+                aligned_ex = ex_date
+            else:
+                future = close_adj.index[close_adj.index >= ex_date]
+                if len(future) == 0:
+                    continue
+                aligned_ex = future[0]
+
+            ex_close = close_adj.loc[aligned_ex, sid]
+            if pd.isna(ex_close) or ex_close <= 0:
+                continue
+
+            ev = events[ex_date]
+            # cash_div 單位是元/股；stock_div 單位也是元/股，需除以面額 PAR_VALUE 才變比率
+            stock_ratio = ev['stock'] / PAR_VALUE if ev['stock'] > 0 else 0.0
+            F_cash = ex_close / (ex_close + ev['cash']) if ev['cash'] > 0 else 1.0
+            F_stock = 1.0 / (1.0 + stock_ratio) if stock_ratio > 0 else 1.0
+            F = F_cash * F_stock
+
+            if method == 'backward':
+                # ex-date 之前的 close 乘上 F
+                mask = close_adj.index < aligned_ex
+                close_adj.loc[mask, sid] = close_adj.loc[mask, sid] * F
+            else:  # forward
+                # ex-date 之後的 close 乘上 (1/F)
+                mask = close_adj.index > aligned_ex
+                close_adj.loc[mask, sid] = close_adj.loc[mask, sid] / F
+
+    return close_adj
 
 
 def compute_factors(close: pd.DataFrame, pe: pd.DataFrame, roe: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -395,6 +528,8 @@ def run_backtest(
         monthly_turnover=monthly_turnover,
         monthly_cost=monthly_cost,
         kpis=kpis,
+        include_dividends=False,   # 同步版不含息
+        adjust_method='none',
     )
 
 
@@ -403,7 +538,7 @@ def run() -> BacktestResult:
     token = load_finmind_token()
     log.info(f"使用 FinMind token ...{token[-8:]}")
 
-    df_price, df_per, df_fin = fetch_data(token, STOCK_POOL, START_DATE, END_DATE)
+    df_price, df_per, df_fin, _ = fetch_data(token, STOCK_POOL, START_DATE, END_DATE)
     close, volume, pe, roe = build_wide_tables(df_price, df_per, df_fin)
 
     # 過濾：股價全空 / 全缺的股票
@@ -426,6 +561,8 @@ def run() -> BacktestResult:
 
     result = run_backtest(close, position, total_score, market_close=market_close)
     result.selected_monthly = selected
+    result.include_dividends = False
+    result.adjust_method = 'none'
 
     # 印 KPI
     k = result.kpis

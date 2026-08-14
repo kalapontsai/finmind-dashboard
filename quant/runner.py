@@ -73,6 +73,8 @@ DEFAULT_CONFIG = {
     'end': '2026-08-12',
     'use_cache': True,
     'token': None,                # None → 用 FINMIND_TOKEN
+    'include_dividends': False,   # v1.4：是否含息（True 多抓 TaiwanStockDividend）
+    'adjust_method': 'backward',  # v1.4：除權息調整方式 backward/forward/none
 }
 
 
@@ -224,16 +226,21 @@ def run(user_cfg: dict | None = None):
         raise ValueError('FINMIND_TOKEN 未設定')
 
     # ── 4. 抓資料 ──
-    df_price, df_per, df_fin = fetch_data(
+    df_price, df_per, df_fin, df_div = fetch_data(
         token=token,
         stock_list=pool,
         start=cfg['start'],
         end=cfg['end'],
         use_cache=cfg['use_cache'],
+        include_dividends=cfg.get('include_dividends', False),
     )
 
     # ── 5. 建寬表 + 過濾只有價量的股票（ETF 沒 PE/ROE） ──
-    close, volume, pe, roe = build_wide_tables(df_price, df_per, df_fin)
+    close, volume, pe, roe = build_wide_tables(
+        df_price, df_per, df_fin,
+        df_div=df_div,
+        adjust_method=cfg.get('adjust_method', 'backward'),
+    )
     valid_stocks = (
         close.columns[close.notna().any()]
         .intersection(pe.columns)
@@ -278,6 +285,9 @@ def run(user_cfg: dict | None = None):
         total_score=total_score,
         market_close=market_close,
     )
+    # v1.4：標註除權息調整設定（供 report.py 顯示）
+    bt.include_dividends = cfg.get('include_dividends', False)
+    bt.adjust_method = cfg.get('adjust_method', 'none') if cfg.get('include_dividends', False) else 'none'
     return bt
 
 

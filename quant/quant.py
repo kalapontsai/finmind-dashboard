@@ -93,7 +93,15 @@ def fetch_data(token: str, stock_list: list[str], start: str, end: str, use_cach
             cache_path = CACHE_DIR / f"{name}_{stock_id}.parquet"
             if use_cache and cache_path.exists() and not _is_stale(cache_path):
                 try:
-                    all_dfs.append(pd.read_parquet(cache_path))
+                    df = pd.read_parquet(cache_path)
+                    # v1.4 P3-7：cache 檔可能含比請求更廣的日期（如之前用 2016-2026 抓過），
+                    # 按請求區間裁剪，避免 X 軸 / 報酬計算拉到請求外的資料。
+                    if 'date' in df.columns and start and end:
+                        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+                        s_ts = pd.Timestamp(start)
+                        e_ts = pd.Timestamp(end)
+                        df = df[(df['date'] >= s_ts) & (df['date'] <= e_ts)]
+                    all_dfs.append(df)
                     cached += 1
                     continue
                 except Exception:

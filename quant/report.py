@@ -28,11 +28,32 @@ def _fmt_num(v: float, dec: int = 2) -> str:
     return f"{v:,.{dec}f}"
 
 
-def build_charts(result) -> dict:
-    """回傳所有 plotly figure 的 HTML 字串。"""
+def _clip_series(s: pd.Series, start: str | None, end: str | None) -> pd.Series:
+    """v1.4 P3-7：按請求區間裁剪 series（cache 可能含比請求更廣的日期）。
+    start/end 為 None 或 series 空 → 不裁剪。
+    """
+    if s is None or s.empty or not start or not end:
+        return s
+    try:
+        s_ts = pd.Timestamp(start)
+        e_ts = pd.Timestamp(end)
+        # index 為 datetime 或 date 都吃
+        idx = s.index
+        mask = (idx >= s_ts) & (idx <= e_ts)
+        return s[mask]
+    except Exception:
+        return s
+
+
+def build_charts(result, start: str | None = None, end: str | None = None) -> dict:
+    """回傳所有 plotly figure 的 HTML 字串。
+
+    v1.4 P3-7：start / end 傳入時 → 裁剪所有 X 軸資料到 [start, end]。
+    """
     close = result.close
-    cum_strategy = result.cum_strategy
-    cum_benchmark = result.cum_benchmark
+    # v1.4 P3-7：裁剪 cum_* / monthly_* 到請求區間
+    cum_strategy = _clip_series(result.cum_strategy, start, end)
+    cum_benchmark = _clip_series(result.cum_benchmark, start, end)
 
     # 1. 累計淨值曲線（策略 + 雙基準 B&H）
     fig_equity = go.Figure()
@@ -48,8 +69,9 @@ def build_charts(result) -> dict:
     ))
     # 雙基準 B&H：0050 市場
     if result.cum_market_0050 is not None:
+        cum_market_0050 = _clip_series(result.cum_market_0050, start, end)
         fig_equity.add_trace(go.Scatter(
-            x=result.cum_market_0050.index, y=result.cum_market_0050.values,
+            x=cum_market_0050.index, y=cum_market_0050.values,
             name='B&H（0050 市場）', line=dict(color='#d29922', width=1.5, dash='dot'),
         ))
     fig_equity.update_layout(
@@ -81,8 +103,9 @@ def build_charts(result) -> dict:
 
     # 3. 月度換倉成本
     fig_cost = go.Figure()
+    monthly_cost = _clip_series(result.monthly_cost, start, end)
     fig_cost.add_trace(go.Bar(
-        x=result.monthly_cost.index, y=result.monthly_cost.values * 100,
+        x=monthly_cost.index, y=monthly_cost.values * 100,
         marker_color='#d29922', name='月度換倉成本 (%)',
     ))
     fig_cost.update_layout(
@@ -211,9 +234,6 @@ def render_html(result, cfg: dict | None = None) -> str:
     - 若不傳 → fallback 讀 config.py（向後相容）
     - 顯示的區間 / Top N / 股票池大小 / 費率 都以 cfg 為準
     """
-    charts = build_charts(result)
-    k = result.kpis
-
     # ── 取實際值（cfg 優先，否則 fallback config.py / load_pool）──
     from config import (
         COMMISSION, END_DATE, SLIPPAGE, START_DATE, STOCK_POOL, TAX, TOP_N, WEIGHTS,
@@ -221,6 +241,9 @@ def render_html(result, cfg: dict | None = None) -> str:
     actual_start = (cfg or {}).get('start') or START_DATE
     actual_end = (cfg or {}).get('end') or END_DATE
     actual_top_n = int((cfg or {}).get('top_n') or TOP_N)
+    # v1.4 P3-7：build_charts / selected_monthly / close 都按請求區間裁剪
+    charts = build_charts(result, start=actual_start, end=actual_end)
+    k = result.kpis
     # v1.4 P3-6：pool 從 cfg 或動態 load_pool() 來；不再 fallback STOCK_POOL (26 檔硬寫)
     cfg_pool = (cfg or {}).get('pool')
     if isinstance(cfg_pool, list) and cfg_pool:
@@ -233,8 +256,32 @@ def render_html(result, cfg: dict | None = None) -> str:
             actual_pool = STOCK_POOL  # 終極 fallback（不該走到這）
     actual_pool_size = len(actual_pool) if isinstance(actual_pool, list) else 0
 
-    # v1.4 P3-6：Top N 選股個別報酬表（放在「每月選股」下方）
-    per_stock_table_html, _per_stock_rows = _per_stock_returns(result, top_n=actual_top_n)
+    # v1.4 P3-7：selected_monthly 按請求區間過濾，避免 X 軸拉到 2016 的舊資料
+    raw_selected = getattr(result, 'selected_monthly', None) or {}
+    s_ts = pd.Timestamp(actual_start) if actual_start else None
+    e_ts = pd.Timestamp(actual_end) if actual_end else None
+    if s_ts or e_ts:
+        s_str = s_ts.strftime('%Y-%m-%d') if s_ts else None
+        e_str = e_ts.strftime('%Y-%m-%d') if e_ts else None
+        clipped_selected = {
+            k_: v for k_, v in raw_selected.items()
+            if (not s_str or k_ >= s_str) and (not e_str or k_ <= e_str)
+        }
+    else:
+        clipped_selected = raw_selected
+
+    # v1.4 P3-6 + P3-7：Top N 選股個別報酬表（用 clipped selected + clipped close）
+    # 讓 _per_stock_returns 計算的「首次入選 → 最後出場」不會落到請求區間外
+    if clipped_selected is not raw_selected:
+        # 構造一個 lightweight wrapper 給 _per_stock_returns 用
+        class _ResultProxy:
+            pass
+        _proxy = _ResultProxy()
+        _proxy.selected_monthly = clipped_selected
+        _proxy.close = _clip_series(getattr(result, 'close', None), actual_start, actual_end)
+        per_stock_table_html, _per_stock_rows = _per_stock_returns(_proxy, top_n=actual_top_n)
+    else:
+        per_stock_table_html, _per_stock_rows = _per_stock_returns(result, top_n=actual_top_n)
     actual_fee_buy = float((cfg or {}).get('fee_buy') if (cfg or {}).get('fee_buy') is not None else COMMISSION)
     actual_fee_sell = float((cfg or {}).get('fee_sell') if (cfg or {}).get('fee_sell') is not None else COMMISSION)
     actual_tax_sell = float((cfg or {}).get('tax_sell') if (cfg or {}).get('tax_sell') is not None else TAX)
@@ -246,8 +293,8 @@ def render_html(result, cfg: dict | None = None) -> str:
     wf_enabled = (cfg or {}).get('walk_forward', False)
 
     selected_rows = ''
-    for date_str in sorted(result.selected_monthly.keys()):
-        stocks = result.selected_monthly[date_str]
+    for date_str in sorted(clipped_selected.keys()):
+        stocks = clipped_selected[date_str]
         chips = ' '.join(f'<span class="chip">{s}</span>' for s in stocks)
         # v1.4 walk-forward：驗證期的選股以淡化顯示（鎖倉不換倉，但 selected 仍記錄原候選）
         is_validation = (

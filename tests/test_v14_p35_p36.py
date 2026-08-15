@@ -91,13 +91,13 @@ def test_runner_writes_cfg_pool_and_selected():
     from quant.runner import merge_config, run_and_save
 
     cfg_in = merge_config({
-        'pool': ['2330', '2317', '2454'],
+        'pool': ['2317', '2454'],   # 兩者 cache 都覆蓋 2025-01-01 ~ 2025-12-31
         'strategies': [
             {'name': 'value', 'enabled': True, 'weight': 0.5},
             {'name': 'momentum', 'enabled': True, 'weight': 0.5},
         ],
-        'start': '2024-01-01',
-        'end': '2024-12-31',
+        'start': '2025-01-01',
+        'end': '2025-12-31',
         'top_n': 2,
         'rebalance_freq': 'monthly',
         'fee_buy': 0.001425, 'fee_sell': 0.001425,
@@ -108,7 +108,7 @@ def test_runner_writes_cfg_pool_and_selected():
     result, _save_meta = run_and_save(cfg_in)
 
     # 確認 cfg['pool'] 寫回（實際是 merge 進去的 pool）
-    assert cfg_in['pool'] == ['2330', '2317', '2454']
+    assert cfg_in['pool'] == ['2317', '2454']
     # 確認 selected_monthly 不是空 dict
     assert isinstance(result.selected_monthly, dict), \
         f'selected_monthly 必須是 dict，got {type(result.selected_monthly)}'
@@ -211,3 +211,97 @@ def test_api_quant_pool_no_26_fallback(monkeypatch):
     # 預設 100 檔（pool.json）
     assert data['count'] >= 50, f'預期 ≥ 50 檔，got {data["count"]}'
     assert data['count'] != 26, f'不該 fallback 26 檔 STOCK_POOL，got {data["count"]}'
+
+
+# ────────────────────────── P3-7：日期裁剪 ──────────────────────────
+
+def test_clip_series_to_range():
+    """_clip_series 按 start/end 裁剪 series；start/end 為 None 時不裁剪"""
+    import pandas as pd
+    from quant.report import _clip_series
+
+    dates = pd.date_range('2024-01-01', '2024-12-31', freq='D')
+    s = pd.Series([1.0] * len(dates), index=dates)
+
+    # 裁剪
+    clipped = _clip_series(s, '2024-06-01', '2024-06-30')
+    assert clipped.index[0] == pd.Timestamp('2024-06-01')
+    assert clipped.index[-1] == pd.Timestamp('2024-06-30')
+    assert len(clipped) == 30
+
+    # 不裁剪（None）
+    not_clipped = _clip_series(s, None, None)
+    assert len(not_clipped) == len(s)
+
+    # 空 series
+    empty = _clip_series(pd.Series([], dtype=float), '2024-06-01', '2024-06-30')
+    assert len(empty) == 0
+
+
+def test_build_charts_clips_x_axis():
+    """build_charts() 傳入 start/end → cum_strategy 等 X 軸資料被裁剪"""
+    import pandas as pd
+    from quant.report import build_charts
+
+    # 模擬一個 BacktestResult，含跨區間資料
+    wide_dates = pd.date_range('2020-01-01', '2024-12-31', freq='D')
+    class _R:
+        close = pd.DataFrame({f's{i}': [1.0]*len(wide_dates) for i in range(3)}, index=wide_dates)
+        cum_strategy = pd.Series([1.0] * len(wide_dates), index=wide_dates)
+        cum_benchmark = pd.Series([1.0] * len(wide_dates), index=wide_dates)
+        cum_market_0050 = None
+        monthly_cost = pd.Series([0.001] * len(wide_dates), index=wide_dates)
+
+    result = _R()
+
+    # 沒傳 start/end → 不裁剪
+    charts_full = build_charts(result)
+    # 裁剪到 2022-2023
+    charts_clipped = build_charts(result, start='2022-01-01', end='2023-12-31')
+
+    # 驗證 HTML 中沒有 2020/2024 的 date 出現
+    assert '2020-01-01' in charts_full['equity'] or '2020-01-02' in charts_full['equity']
+    assert '2020-01-01' not in charts_clipped['equity']
+    assert '2024-12-31' not in charts_clipped['equity']
+
+
+def test_report_clips_selected_monthly_and_per_stock():
+    """render_html() → selected_monthly 與 per-stock 表的期間都被裁剪到 cfg 範圍"""
+    import pandas as pd
+    from quant.report import render_html
+
+    dates = pd.date_range('2020-01-01', '2024-12-31', freq='MS')  # 月初
+    selected = {d.strftime('%Y-%m-%d'): ['2330'] for d in dates}
+
+    class _R:
+        kpis = {
+            'trading_days': 100, 'total_return': 0.1,
+            'pool_benchmark_return': 0.05, 'pool_excess_return': 0.05,
+            'mdd': -0.1, 'sharpe': 0.5, 'rebalance_count': 10,
+        }
+        cum_strategy = pd.Series([1.0] * len(dates), index=dates)
+        cum_benchmark = pd.Series([1.0] * len(dates), index=dates)
+        cum_market_0050 = None
+        selected_monthly = selected
+        monthly_cost = pd.Series([0.001] * len(dates), index=dates)
+        monthly_turnover = pd.Series([0.1] * len(dates), index=dates)
+        include_dividends = False
+        adjust_method = 'none'
+        walk_forward_split_date = None
+        # close 給 per-stock 用
+        full_dates = pd.date_range('2020-01-01', '2024-12-31', freq='D')
+        close = pd.DataFrame({'2330': [100.0] * len(full_dates)}, index=full_dates)
+
+    result = _R()
+    cfg = {
+        'pool': ['2330'], 'top_n': 1,
+        'start': '2022-01-01', 'end': '2023-12-31',
+        'strategies': [{'name': 'value', 'enabled': True, 'weight': 1.0}],
+    }
+
+    html = render_html(result, cfg)
+    # 應該看不到 2020 / 2024 月份
+    assert '2020-' not in html, 'selected_monthly / per-stock 表不應含 2020 年月份'
+    assert '2024-' not in html, 'selected_monthly / per-stock 表不應含 2024 年月份'
+    # 應該看到 2022 / 2023 月份
+    assert '2022-' in html or '2023-' in html

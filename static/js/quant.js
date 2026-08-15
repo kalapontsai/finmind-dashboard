@@ -6,6 +6,16 @@
  * - 顯示上次執行時間狀態
  */
 
+
+// ===== debounce（v1.4 P3-4） =====
+function debounce(fn, ms) {
+  let t;
+  return function (...args) {
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
 const STRATEGY_LABELS = {
     value:    { name: '價值', icon: '💎', desc: 'PER rank_pct（PER 越低 → 排名越高）' },
     momentum: { name: '動能', icon: '🚀', desc: 'N 日 close.pct_change rank_pct' },
@@ -126,7 +136,7 @@ const QuantPage = {
         const walkForwardCb = document.getElementById('walkForwardCb');
         const trainPctEl = document.getElementById('trainPct');
         if (walkForwardCb && trainPctEl) {
-            walkForwardCb.addEventListener('change', () => {
+            walkForwardCb.addEventListener('change', debounce((, 250) => {
                 trainPctEl.disabled = !walkForwardCb.checked;
             });
         }
@@ -163,7 +173,7 @@ const QuantPage = {
             const cb = document.getElementById(`strat-cb-${s.name}`);
             const wt = document.getElementById(`strat-w-${s.name}`);
             if (cb) {
-                cb.addEventListener('change', () => {
+                cb.addEventListener('change', debounce((, 250) => {
                     s.enabled = cb.checked;
                     if (wt) wt.disabled = !cb.checked;
                     this.updateWeightSum();
@@ -171,12 +181,12 @@ const QuantPage = {
                 });
             }
             if (wt) {
-                wt.addEventListener('input', () => {
+                wt.addEventListener('input', debounce((, 250) => {
                     const v = parseFloat(wt.value);
                     s.weight = isNaN(v) ? 0 : Math.max(0, Math.min(1, v));
                     this.updateWeightSum();
                 });
-                wt.addEventListener('change', () => {
+                wt.addEventListener('change', debounce((, 250) => {
                     this.saveConfig();
                 });
             }

@@ -1,4 +1,6 @@
 #!/bin/bash
+# 2026-08-15: 補 cron 環境沒 source .bashrc → openclaw 不在 $PATH
+export PATH="$HOME/.local/bin:$PATH"
 # FinMind No-LLM heartbeat
 # 讀 finmind-iter.md → 抓下一個 [ ] → 跑對應腳本 → git commit/push → openclaw message send
 # 完全不用 LLM。失敗 → Telegram 收 error log
@@ -28,7 +30,8 @@ log() {
 
 notify() {
     # $1 = message
-    openclaw message send --channel telegram --target "$CHAT_ID" --message "$1" 2>> "$LOG_FILE" || \
+    # 2026-08-15: 補 --account bot-two → 訊息歸二寶（不再借大寶 default）
+    openclaw message send --channel telegram --account bot-two --target "$CHAT_ID" --message "$1" 2>> "$LOG_FILE" || \
         log "WARN: openclaw message send failed: $1"
 }
 

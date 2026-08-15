@@ -37,6 +37,7 @@ log = logging.getLogger('quant')
 
 
 @dataclass
+from app_config import QUANT_CACHE_DIR
 class BacktestResult:
     """回測結果"""
     close: pd.DataFrame

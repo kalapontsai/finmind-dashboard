@@ -572,3 +572,73 @@ def health():
         'ok': all_ok,
         'checks': checks,
     }), 200 if all_ok else 503
+
+
+@api_bp.post("/quant_compare")
+def quant_compare():
+    """
+    策略對比：一次跑 value / momentum / quality 三組，回傳三條淨值曲線 + KPI 對照表。
+    Body: {
+        "pool": ["2330", "0050", ...],
+        "weights": {"value": 0.4, "momentum": 0.3, "quality": 0.3},
+        "start": "2023-01-01",
+        "end": "2026-08-15",
+        "top_n": 5,
+        "fee_buy": 0.001425,
+        "fee_sell": 0.001425,
+        "tax_sell": 0.003,
+        "slippage": 0.001,
+        "standardize": "rank"
+    }
+    """
+    try:
+        body = request.get_json(force=True, silent=False) or {}
+    except (ValueError, TypeError):
+        return jsonify({"ok": False, "error": "invalid json body"}), 400
+
+    pool = body.get("pool") or []
+    weights = body.get("weights") or {"value": 0.4, "momentum": 0.3, "quality": 0.3}
+    start = body.get("start", "2023-01-01")
+    end = body.get("end", "")
+    top_n = int(body.get("top_n", 5))
+    standardize = body.get("standardize", "rank")
+
+    # 三組：value only / momentum only / quality only + 用户指定權重的組合
+    combos = [
+        {"name": "value",    "strategies": [{"name": "value",    "enabled": True, "weight": 1.0, "params": {}}]},
+        {"name": "momentum", "strategies": [{"name": "momentum", "enabled": True, "weight": 1.0, "params": {}}]},
+        {"name": "quality",  "strategies": [{"name": "quality",  "enabled": True, "weight": 1.0, "params": {}}]},
+        {
+            "name": "blend",
+            "strategies": [
+                {"name": k, "enabled": True, "weight": v, "params": {}}
+                for k, v in weights.items() if v > 0
+            ],
+        },
+    ]
+
+    results = []
+    for combo in combos:
+        if not combo["strategies"]:
+            continue
+        try:
+            from lib.quant_runner import run_quant_sync  # type: ignore
+            r = run_quant_sync(
+                pool=pool, strategies=combo["strategies"], rebalance_freq="monthly",
+                top_n=top_n, start=start, end=end,
+                fee_buy=body.get("fee_buy", 0.001425),
+                fee_sell=body.get("fee_sell", 0.001425),
+                tax_sell=body.get("tax_sell", 0.003),
+                slippage=body.get("slippage", 0.001),
+                standardize=standardize,
+            )
+            results.append({
+                "name": combo["name"],
+                "kpis": r.get("kpis", {}) if isinstance(r, dict) else {},
+                "nav_curve": r.get("nav_curve", []) if isinstance(r, dict) else [],
+            })
+        except (ImportError, KeyError, ValueError, TypeError) as exc:
+            results.append({"name": combo["name"], "error": str(exc)})
+
+    return jsonify({"ok": True, "results": results})
+

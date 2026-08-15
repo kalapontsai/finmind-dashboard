@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <title>策略對比 — FinMind</title>
+  <link rel="stylesheet" href="/static/css/finlab.css">
+  <link rel="stylesheet" href="/static/css/quant.css">
+  <script src="/static/js/compare.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>策略對比 (v1.4 P2-1)</h1>
+    <nav><a href="/">回首頁</a></nav>
+  </header>
+
+  <main>
+    <section class="compare-form">
+      <label>股票池（逗號分隔）
+        <input id="pool-input" type="text" placeholder="2330,0050,2884">
+      </label>
+      <label>回測起 <input id="start-input" type="date" value="2023-01-01"></label>
+      <label>回測迄 <input id="end-input" type="date"></label>
+      <label>top_n <input id="topn-input" type="number" min="1" max="20" value="5"></label>
+
+      <fieldset>
+        <legend>策略權重</legend>
+        <label>value <input id="w-value" type="number" step="0.05" value="0.4"></label>
+        <label>momentum <input id="w-momentum" type="number" step="0.05" value="0.3"></label>
+        <label>quality <input id="w-quality" type="number" step="0.05" value="0.3"></label>
+        <span id="weight-sum">總和: 1.00</span>
+        <button id="run-btn" type="button">執行對比</button>
+      </fieldset>
+    </section>
+
+    <section class="compare-result">
+      <table id="kpi-table" border="1">
+        <thead>
+          <tr>
+            <th>策略</th><th>累計報酬</th><th>Sharpe</th><th>MDD</th><th>換倉次數</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div id="nav-chart"></div>
+    </section>
+  </main>
+</body>
+</html>

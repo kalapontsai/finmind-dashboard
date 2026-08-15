@@ -136,9 +136,9 @@ const QuantPage = {
         const walkForwardCb = document.getElementById('walkForwardCb');
         const trainPctEl = document.getElementById('trainPct');
         if (walkForwardCb && trainPctEl) {
-            walkForwardCb.addEventListener('change', debounce((, 250) => {
+            walkForwardCb.addEventListener('change', debounce(() => {
                 trainPctEl.disabled = !walkForwardCb.checked;
-            });
+            }, 250));
         }
 
         await this.loadStrategies();
@@ -173,22 +173,22 @@ const QuantPage = {
             const cb = document.getElementById(`strat-cb-${s.name}`);
             const wt = document.getElementById(`strat-w-${s.name}`);
             if (cb) {
-                cb.addEventListener('change', debounce((, 250) => {
+                cb.addEventListener('change', debounce(() => {
                     s.enabled = cb.checked;
                     if (wt) wt.disabled = !cb.checked;
                     this.updateWeightSum();
                     this.saveConfig();
-                });
+                }, 250));
             }
             if (wt) {
-                wt.addEventListener('input', debounce((, 250) => {
+                wt.addEventListener('input', debounce(() => {
                     const v = parseFloat(wt.value);
                     s.weight = isNaN(v) ? 0 : Math.max(0, Math.min(1, v));
                     this.updateWeightSum();
-                });
-                wt.addEventListener('change', debounce((, 250) => {
+                }, 250));
+                wt.addEventListener('change', debounce(() => {
                     this.saveConfig();
-                });
+                }, 250));
             }
         }
     },

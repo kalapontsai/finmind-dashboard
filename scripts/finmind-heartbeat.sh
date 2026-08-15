@@ -13,6 +13,21 @@ export PATH="$HOME/.local/bin:$PATH"
 
 set -e
 
+# ───────── AUTO PAUSE GUARD（2026-08-15 股寶加）─────────
+# 觸發：94afb48 (debounce JS 語法錯誤) + d0990fd (test_cost.py 引用不存在函式)
+#       → heartbeat 自動補強在沒人工 review 下產 P0 bug，整個 quant 頁 SyntaxError
+# 大大指示：「先暫停所有心跳自動補強，強制改回人工 review 後才 commit」
+#
+# 恢復方式（人工 review 流程補完後）：
+#   1. 將下面 AUTO_PAUSE 改為 false（或設環境變數 AUTO_PAUSE=false）
+#   2. 確認 heartbeat.sh 改完沒被繞過：grep AUTO_PAUSE scripts/finmind-heartbeat.sh
+AUTO_PAUSE="${AUTO_PAUSE:-true}"
+if [ "$AUTO_PAUSE" = "true" ]; then
+    log "AUTO_PAUSE=true → heartbeat 跳過本次執行（人工 review 後再手動改 AUTO_PAUSE=false）"
+    notify "⏸ FinMind heartbeat 暫停中（AUTO_PAUSE=true）。新項目請走人工 review。"
+    exit 0
+fi
+
 # ───────── config ─────────
 ITER_FILE="$HOME/.openclaw/workspace-two/finmind-iter.md"
 PROJECT_DIR="/mnt/d/OneDrive - Sampo Corporation/3.Data/5.Python/finlab_tw_screener"

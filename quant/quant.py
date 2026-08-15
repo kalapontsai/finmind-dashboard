@@ -53,6 +53,7 @@ class BacktestResult:
     kpis: dict
     include_dividends: bool = False   # v1.4：是否含息報酬
     adjust_method: str = 'none'      # v1.4：除權息調整方式
+    walk_forward_split_date: str | None = None  # v1.4：walk-forward 切割日期（None=未啟用）
 
 
 def fetch_data(token: str, stock_list: list[str], start: str, end: str, use_cache: bool = True, cache_stale_days: int = 7, include_dividends: bool = False):
@@ -340,9 +341,27 @@ def compute_factors(close: pd.DataFrame, pe: pd.DataFrame, roe: pd.DataFrame) ->
     return total_score, factor_val, factor_mom, factor_qual
 
 
-def build_position(close: pd.DataFrame, total_score: pd.DataFrame, volume: pd.DataFrame, rebalance_freq: str = 'monthly', min_liquidity_shares: int = 0) -> tuple[pd.DataFrame, dict]:
-    """每月第一個交易日依總分選出 Top N，建持倉矩陣。"""
-    log.info(f"每月選股 Top {TOP_N}，等權重 {EQUAL_WEIGHT:.0%}")
+def build_position(
+    close: pd.DataFrame,
+    total_score: pd.DataFrame,
+    volume: pd.DataFrame,
+    rebalance_freq: str = 'monthly',
+    min_liquidity_shares: int = 0,
+    rebalance_until: str | pd.Timestamp | None = None,
+    top_n: int | None = None,
+    equal_weight: float | None = None,
+) -> tuple[pd.DataFrame, dict]:
+    """依 rebalance_freq 在指定日選出 Top N，建持倉矩陣。
+
+    v1.4 walk-forward 參數：
+      - rebalance_until：限制換倉日期 <= 此日。Walk-forward 驗證期不換倉，
+        靠 .ffill() 自動延續訓練期最後一次選股。
+      - top_n：覆寫 config.TOP_N（讓 runner/UI 從 config 傳入）
+      - equal_weight：覆寫 config.EQUAL_WEIGHT（如 top_n=10 → 0.10）
+    """
+    _top_n = top_n if top_n is not None else TOP_N
+    _equal_weight = equal_weight if equal_weight is not None else EQUAL_WEIGHT
+    log.info(f"選股 Top {_top_n}，等權重 {_equal_weight:.0%}")
 
     close.index = pd.to_datetime(close.index)
     total_score.index = pd.to_datetime(total_score.index)
@@ -379,6 +398,14 @@ def build_position(close: pd.DataFrame, total_score: pd.DataFrame, volume: pd.Da
                 rebalance_dates.append(available[mask][0])
         log.info(f"換倉頻率: 每月 ({len(rebalance_dates)} 次)")
 
+    # v1.4 walk-forward：限制換倉日期 <= rebalance_until
+    if rebalance_until is not None:
+        until_ts = pd.Timestamp(rebalance_until)
+        before = len(rebalance_dates)
+        rebalance_dates = [d for d in rebalance_dates if d <= until_ts]
+        log.info(f"🔬 Walk-forward：rebalance_until={until_ts.strftime('%Y-%m-%d')}，"
+                 f"換倉次數 {before} → {len(rebalance_dates)}")
+
     position = pd.DataFrame(0.0, index=close.index, columns=close.columns)
     selected = {}
     for d in rebalance_dates:
@@ -387,9 +414,9 @@ def build_position(close: pd.DataFrame, total_score: pd.DataFrame, volume: pd.Da
         row = valid_score.loc[d].dropna()
         if len(row) == 0:
             continue
-        top = row.nlargest(min(TOP_N, len(row))).index.tolist()
+        top = row.nlargest(min(_top_n, len(row))).index.tolist()
         # 從 d 當天開始持倉
-        position.loc[d:, top] = EQUAL_WEIGHT
+        position.loc[d:, top] = _equal_weight
         selected[d.strftime('%Y-%m-%d')] = top
 
     position = position.ffill().fillna(0)

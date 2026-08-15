@@ -108,7 +108,14 @@ def render_html(result) -> str:
     for date_str in sorted(result.selected_monthly.keys()):
         stocks = result.selected_monthly[date_str]
         chips = ' '.join(f'<span class="chip">{s}</span>' for s in stocks)
-        selected_rows += f'<tr><td>{date_str}</td><td>{chips}</td></tr>'
+        # v1.4 walk-forward：驗證期的選股以淡化顯示（鎖倉不換倉，但 selected 仍記錄原候選）
+        is_validation = (
+            k.get('walk_forward_enabled')
+            and k.get('walk_forward_split_date')
+            and date_str >= k['walk_forward_split_date']
+        )
+        row_class = ' class="wf-val"' if is_validation else ''
+        selected_rows += f'<tr{row_class}><td>{date_str}</td><td>{chips}</td></tr>'
 
     # 雙基準 alpha 格式化
     pool_alpha_val = k.get('pool_excess_return', 0)
@@ -137,6 +144,12 @@ def render_html(result) -> str:
         <div class="row"><span class="lbl">費率</span><span>買 {COMMISSION:.4%} / 賣 {COMMISSION:.4%}+{TAX:.3%} / 滑價 {SLIPPAGE:.3%}</span></div>
         <div class="row"><span class="lbl">除權息調整</span><span>{getattr(result, 'adjust_method', 'none')}</span></div>
         <div class="row"><span class="lbl">交易日</span><span>{k['trading_days']}</span></div>
+        {('<div class="row"><span class="lbl">🔬 Walk-forward</span>'
+          '<span>訓練 {train_pct:.0%} / 驗證 {val_pct:.0%}（切點 {split_date}）</span></div>').format(
+              train_pct=k.get('train_pct', 0.7),
+              val_pct=1 - k.get('train_pct', 0.7),
+              split_date=k.get('walk_forward_split_date', '—'),
+          ) if k.get('walk_forward_enabled') else ''}
     </div>
     """
 
@@ -167,6 +180,25 @@ def render_html(result) -> str:
             <div class="label">總換倉次數</div>
             <div class="value">{k['rebalance_count']}</div>
         </div>
+        {('<div class="kpi wf" style="border-left-color:#d29922;">'
+          '<div class="label">🔬 訓練期報酬</div>'
+          '<div class="value {cls1}">{v1}</div>'
+          '</div>'
+          '<div class="kpi wf" style="border-left-color:#d29922;">'
+          '<div class="label">🔬 驗證期報酬</div>'
+          '<div class="value {cls2}">{v2}</div>'
+          '</div>'
+          '<div class="kpi wf" style="border-left-color:#d29922;">'
+          '<div class="label">🔬 衰退 (val-train)</div>'
+          '<div class="value {cls3}">{v3}</div>'
+          '</div>').format(
+              cls1='pos' if k.get('training_return', 0) >= 0 else 'neg',
+              v1=_fmt_pct(k.get('training_return', 0)),
+              cls2='pos' if k.get('validation_return', 0) >= 0 else 'neg',
+              v2=_fmt_pct(k.get('validation_return', 0)),
+              cls3='pos' if k.get('walk_forward_decay', 0) >= 0 else 'neg',
+              v3=_fmt_pct(k.get('walk_forward_decay', 0)),
+          ) if k.get('walk_forward_enabled') else ''}
     </div>
     """
 
@@ -212,6 +244,8 @@ th {{ color: #8b949e; font-weight: 600; background: #21262d; position: sticky; t
     font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px;
     border: 1px solid #30363d;
 }}
+tr.wf-val td {{ opacity: 0.45; }}
+tr.wf-val td:first-child::after {{ content: ' 🔒'; color: #d29922; font-size: 10px; }}
 .footer {{ color: #6e7681; font-size: 11px; margin-top: 30px; text-align: center; }}
 </style>
 </head>

@@ -78,6 +78,16 @@ const QuantPage = {
                         <label style="font-size:12px; color:var(--text-muted);" title="20 日均量最低門檻（張）；0 = 不過濾">最低 20 日均量 (張)</label>
                         <input type="number" id="minLiquidity" min="0" step="100" value="0" style="width:100%; padding:6px 8px; background:var(--bg-soft); border:1px solid var(--border); color:var(--text); border-radius:6px;">
                     </div>
+                    <div style="display:flex; align-items:flex-end; gap:12px;">
+                        <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-muted); cursor:pointer;">
+                            <input type="checkbox" id="walkForwardCb"> 🔬 Walk-forward
+                        </label>
+                        <div style="flex:1;">
+                            <label style="font-size:12px; color:var(--text-muted);" title="訓練期佔比；驗證期 = 1 - train_pct">訓練期佔比</label>
+                            <input type="number" id="trainPct" min="0.5" max="0.95" step="0.05" value="0.7" disabled
+                                style="width:100%; padding:6px 8px; background:var(--bg-soft); border:1px solid var(--border); color:var(--text); border-radius:6px;">
+                        </div>
+                    </div>
                 </div>
                 <div id="paramsMsg" style="font-size:12px; color:var(--text-muted); min-height:18px; margin-top:4px;"></div>
             </div>
@@ -112,6 +122,14 @@ const QuantPage = {
         document.getElementById('runBtn').addEventListener('click', () => this.run());
         document.getElementById('reloadBtn').addEventListener('click', () => this.reloadReport());
         document.getElementById('normalizeBtn').addEventListener('click', () => this.normalizeWeights());
+        // v1.4 walk-forward 切換：勾選啟用時才開啟 train_pct 輸入
+        const walkForwardCb = document.getElementById('walkForwardCb');
+        const trainPctEl = document.getElementById('trainPct');
+        if (walkForwardCb && trainPctEl) {
+            walkForwardCb.addEventListener('change', () => {
+                trainPctEl.disabled = !walkForwardCb.checked;
+            });
+        }
 
         await this.loadStrategies();
         await this.checkStatus();
@@ -329,6 +347,13 @@ const QuantPage = {
                 slippage: pct(document.getElementById('slippage').value),
                 min_liquidity_shares: parseInt(document.getElementById('minLiquidity').value, 10) || 0,
             };
+            // v1.4 walk-forward
+            const walkForwardCb = document.getElementById('walkForwardCb');
+            if (walkForwardCb && walkForwardCb.checked) {
+                params.walk_forward = true;
+                const trainPctEl = document.getElementById('trainPct');
+                params.train_pct = parseFloat(trainPctEl.value) || 0.7;
+            }
 
             const data = await FinMindAPI.quantRun(params);
 

@@ -75,6 +75,8 @@ DEFAULT_CONFIG = {
     'token': None,                # None → 用 FINMIND_TOKEN
     'include_dividends': False,   # v1.4：是否含息（True 多抓 TaiwanStockDividend）
     'adjust_method': 'backward',  # v1.4：除權息調整方式 backward/forward/none
+    'walk_forward': False,        # v1.4：walk-forward 樣本外驗證（預設關閉）
+    'train_pct': 0.7,             # v1.4：訓練期占比（驗證期 = 1 - train_pct）
 }
 
 
@@ -269,12 +271,30 @@ def run(user_cfg: dict | None = None):
     )
 
     # ── 8. 建持倉 + 抓 0050 ──
+    walk_forward = cfg.get('walk_forward', False)
+    train_pct = cfg.get('train_pct', 0.7)
+    split_date = None
+    rebalance_until = None
+    top_n = cfg.get('top_n', 5)
+
+    if walk_forward:
+        start_ts = pd.Timestamp(cfg['start'])
+        end_ts = pd.Timestamp(cfg['end'])
+        split_ts = start_ts + (end_ts - start_ts) * train_pct
+        split_date = split_ts.strftime('%Y-%m-%d')
+        rebalance_until = split_date
+        log.info(f'🔬 Walk-forward 啟用：訓練期 {cfg["start"]} ~ {split_date}（{train_pct:.0%}），'
+                 f'驗證期 {split_date} ~ {cfg["end"]}（驗證期鎖倉不換倉）')
+
     position, selected = build_position(
         close=close,
         total_score=total_score,
         volume=volume,
         rebalance_freq=cfg.get('rebalance_freq', 'monthly'),
         min_liquidity_shares=cfg.get('min_liquidity_shares', 0),
+        top_n=top_n,
+        equal_weight=1.0 / top_n,
+        rebalance_until=rebalance_until,
     )
     market_close = fetch_0050_data(token=token, start=cfg['start'], end=cfg['end']) if cfg.get('use_0050_benchmark', True) else None
 
@@ -288,7 +308,66 @@ def run(user_cfg: dict | None = None):
     # v1.4：標註除權息調整設定（供 report.py 顯示）
     bt.include_dividends = cfg.get('include_dividends', False)
     bt.adjust_method = cfg.get('adjust_method', 'none') if cfg.get('include_dividends', False) else 'none'
+    bt.walk_forward_split_date = split_date
+
+    # v1.4：Walk-forward KPI（若啟用）
+    if walk_forward and split_date is not None:
+        _inject_walk_forward_kpis(bt, split_date, train_pct)
+
     return bt
+
+
+def _inject_walk_forward_kpis(bt, split_date: str, train_pct: float):
+    """計算 walk-forward 訓練期 / 驗證期 / 衰退 KPI 並寫入 bt.kpis。
+
+    設計：
+      - training_return：split_date（含）之前的累積報酬（cum_strategy.loc[split] - 1）
+      - validation_return：split_date 之後的報酬（cum_strategy.iloc[-1] / cum_strategy.loc[split] - 1）
+      - combined_return：等同 total_return（整段 cum_strategy.iloc[-1] - 1）
+      - walk_forward_decay：validation_return - training_return（負值 = 過擬合）
+    """
+    cum = bt.cum_strategy
+    if split_date not in cum.index:
+        # split_date 當天沒交易，向前找最近的交易日
+        split_ts = pd.Timestamp(split_date)
+        valid = cum.index[cum.index <= split_ts]
+        if len(valid) == 0:
+            log.warning(f'walk-forward：找不到 split_date {split_date} 之前的交易日')
+            return
+        split_actual = valid[-1]
+        log.info(f'walk-forward：split_date {split_date} 非交易日，'
+                 f'改用最近的交易日 {split_actual.strftime("%Y-%m-%d")}')
+    else:
+        split_actual = pd.Timestamp(split_date)
+
+    train_nav = float(cum.loc[split_actual])
+    full_nav = float(cum.iloc[-1])
+
+    training_return = train_nav - 1.0
+    if train_nav > 0:
+        validation_return = (full_nav / train_nav) - 1.0
+    else:
+        validation_return = 0.0
+    combined_return = full_nav - 1.0
+    walk_forward_decay = validation_return - training_return
+
+    walk_forward_kpis = {
+        'walk_forward_enabled': True,
+        'walk_forward_split_date': split_actual.strftime('%Y-%m-%d'),
+        'train_pct': train_pct,
+        'training_return': training_return,
+        'validation_return': validation_return,
+        'combined_return': combined_return,
+        'walk_forward_decay': walk_forward_decay,
+    }
+    bt.kpis.update(walk_forward_kpis)
+
+    log.info('─' * 56)
+    log.info('🔬 Walk-forward 結果：')
+    log.info(f'   訓練期報酬: {training_return:+.2%}')
+    log.info(f'   驗證期報酬: {validation_return:+.2%}')
+    log.info(f'   衰退 (val - train): {walk_forward_decay:+.2%}（負值 = 過擬合）')
+    log.info('─' * 56)
 
 
 if __name__ == '__main__':

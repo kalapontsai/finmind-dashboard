@@ -21,7 +21,7 @@ set -e
 # 恢復方式（人工 review 流程補完後）：
 #   1. 將下面 AUTO_PAUSE 改為 false（或設環境變數 AUTO_PAUSE=false）
 #   2. 確認 heartbeat.sh 改完沒被繞過：grep AUTO_PAUSE scripts/finmind-heartbeat.sh
-AUTO_PAUSE="${AUTO_PAUSE:-true}"
+AUTO_PAUSE="${AUTO_PAUSE:-false}"   # 2026-08-15 14:28 大大指示：P3-5 + P3-6 review 過，改回 false
 if [ "$AUTO_PAUSE" = "true" ]; then
     log "AUTO_PAUSE=true → heartbeat 跳過本次執行（人工 review 後再手動改 AUTO_PAUSE=false）"
     notify "⏸ FinMind heartbeat 暫停中（AUTO_PAUSE=true）。新項目請走人工 review。"

@@ -399,7 +399,7 @@ def backtest():
         result['stock_id'] = stock_id
         try:
             save_backtest_summary(stock_id, result)
-        except Exception:
+        except (FinMindError, KeyError, ValueError, TypeError, json.JSONDecodeError):
             pass  # 寫歷史失敗不影響回傳
         return jsonify(result)
     except ValueError as e:
@@ -456,7 +456,7 @@ def quant_pool():
                 # 去重 + 排序
                 stocks = sorted(set(stocks))
                 return jsonify({'count': len(stocks), 'stocks': stocks})
-        except Exception:
+        except (FinMindError, KeyError, ValueError, TypeError, json.JSONDecodeError):
             pass
 
     # 26 檔預設池（從 quant/config.py STOCK_POOL 拆出來）
@@ -492,7 +492,7 @@ def strategies_list():
             params = full.get('params', {}) or {}
         except FileNotFoundError:
             pass
-        except Exception:
+        except (FinMindError, KeyError, ValueError, TypeError, json.JSONDecodeError):
             pass
 
         u = user_map.get(name, {'enabled': True, 'weight': 0.0})

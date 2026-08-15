@@ -29,6 +29,7 @@ from config import (
     EQUAL_WEIGHT, END_DATE, MARKET_BENCHMARK, MIN_LIQUIDITY_SHARES,
     MOMENTUM_LOOKBACK, START_DATE, STOCK_POOL, TOP_N, WEIGHTS, load_finmind_token,
 )
+from app_config import QUANT_CACHE_DIR
 
 CACHE_DIR = Path(__file__).parent / 'cache'
 
@@ -37,7 +38,6 @@ log = logging.getLogger('quant')
 
 
 @dataclass
-from app_config import QUANT_CACHE_DIR
 class BacktestResult:
     """回測結果"""
     close: pd.DataFrame
@@ -562,11 +562,18 @@ def run_backtest(
 
 
 def run() -> BacktestResult:
-    """主入口：抓資料 → 算因子 → 建倉 → 回測 → KPI。"""
+    """主入口：抓資料 → 算因子 → 建倉 → 回測 → KPI。
+
+    v1.4 P3-6：股票池改從 `quant/pool.json` 讀（不再用 STOCK_POOL 硬寫 26 檔）。
+    區間改用 START_DATE / END_DATE 預設值（仍可被 runner.run(user_cfg) 蓋過）。
+    """
+    from lib.pool_loader import load_pool  # v1.4 P3-6：取代 STOCK_POOL
     token = load_finmind_token()
     log.info(f"使用 FinMind token ...{token[-8:]}")
 
-    df_price, df_per, df_fin, _ = fetch_data(token, STOCK_POOL, START_DATE, END_DATE)
+    pool = load_pool()
+    log.info(f"從 pool.json 載入 {len(pool)} 檔")
+    df_price, df_per, df_fin, _ = fetch_data(token, pool, START_DATE, END_DATE)
     close, volume, pe, roe = build_wide_tables(df_price, df_per, df_fin)
 
     # 過濾：股價全空 / 全缺的股票

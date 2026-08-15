@@ -73,6 +73,15 @@ const FinMindAPI = {
         return this.get('quant_status');
     },
 
+    /**
+     * 查詢非同步 job 的進度（v1.4 P3-4 修補）
+     * GET /api/quant_status?job_id=xxx
+     * 回傳：{ job_id, status, progress_pct, stage, updated_at, result?, error? }
+     */
+    quantStatusById(jobId) {
+        return this.get('quant_status', { job_id: jobId });
+    },
+
     quantPool() {
         return this.get('quant_pool');
     },

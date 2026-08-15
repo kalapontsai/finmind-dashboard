@@ -120,16 +120,17 @@ def run_quant_async(**kwargs) -> dict:
     def _run():
         try:
             _write_progress(job_id, 'running', 5, '啟動')
-            from quant.runner import run as runner_run
-            result = runner_run(kwargs if kwargs else None)
-
-            # 寫入結果
-            from quant.report import save
-            save(result)
+            # v1.4 P3-5：跑 + 存一起走 run_and_save（保證 report cfg 帶實際參數）
+            from quant.runner import run_and_save
+            _result, save_meta = run_and_save(kwargs if kwargs else None)
 
             _write_progress(
                 job_id, 'done', 100, '完成',
-                result={'elapsed_sec': 0},  # elapsed 由 caller 在寫入時估算
+                result={
+                    'elapsed_sec': 0,  # elapsed 由 caller 在寫入時估算
+                    'html_archive': save_meta['html_archive'],
+                    'json_archive': save_meta['json_archive'],
+                },
             )
         except Exception as e:
             _write_progress(job_id, 'error', 0, '錯誤', error=str(e))
@@ -280,6 +281,8 @@ def get_status(job_id: str | None = None) -> dict:
         }
 
     # ── 同步版（向後相容）：讀 output/backtest_results.json ──
+    from quant.report import list_recent_reports
+
     report_file = QUANT_OUTPUT_DIR / 'report.html'
     results_file = QUANT_OUTPUT_DIR / 'backtest_results.json'
 
@@ -293,6 +296,9 @@ def get_status(job_id: str | None = None) -> dict:
     kpis = None
     cum_strategy_first = None
     cum_strategy_last = None
+    actual_cfg = None  # v1.4 P3-5：回傳實際跑的 cfg
+    archive_html_name = None
+    data = None
     if results_file.is_file():
         try:
             data = json.loads(results_file.read_text(encoding='utf-8'))
@@ -312,8 +318,13 @@ def get_status(job_id: str | None = None) -> dict:
                 if cs:
                     cum_strategy_first = cs[0].get('date', '')[:10]
                     cum_strategy_last = cs[-1].get('date', '')[:10]
+                actual_cfg = data.get('cfg') or None
+                archive_html_name = data.get('archive_html') or None
         except Exception:
             pass
+
+    # v1.4 P3-5：時間序報告列表（最新 10 份）
+    recent_reports = list_recent_reports(limit=10)
 
     return {
         'running': is_running(),
@@ -322,4 +333,7 @@ def get_status(job_id: str | None = None) -> dict:
         'range_start': cum_strategy_first,
         'range_end': cum_strategy_last,
         'kpis': kpis,
+        'cfg': actual_cfg,                # 實際跑的 cfg（給前端 audit）
+        'archive_html': archive_html_name,
+        'recent_reports': recent_reports,  # v1.4 P3-5
     }

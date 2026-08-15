@@ -111,9 +111,11 @@ const QuantPage = {
                     </div>
                 </div>
                 <div id="statusBox" style="display:flex; gap:24px; flex-wrap:wrap; padding:8px 0;">
-                    <div><span style="color:var(--text-muted); font-size:12px;">報告位置</span><br><code style="font-size:13px;">/quant/output/report.html</code></div>
+                    <div><span style="color:var(--text-muted); font-size:12px;">最新報告（時間序）</span><br><code id="archiveName" style="font-size:13px;">/quant/output/report.html</code></div>
                     <div><span style="color:var(--text-muted); font-size:12px;">最後更新</span><br><span id="lastUpdate" style="font-size:13px;">載入中...</span></div>
-                    <div><span style="color:var(--text-muted); font-size:12px;">回測區間</span><br><span id="rangeInfo" style="font-size:13px;">—</span></div>
+                    <div><span style="color:var(--text-muted); font-size:12px;">實際區間</span><br><span id="rangeInfo" style="font-size:13px;">—</span></div>
+                    <div><span style="color:var(--text-muted); font-size:12px;">實際 Top N</span><br><span id="topNInfo" style="font-size:13px;">—</span></div>
+                    <div><span style="color:var(--text-muted); font-size:12px;">實際股票池</span><br><span id="poolInfo" style="font-size:13px;">—</span></div>
                 </div>
                 <div id="runMsg" style="margin-top:8px;"></div>
             </div>
@@ -121,11 +123,14 @@ const QuantPage = {
             <div class="card">
                 <div class="card-header">
                     <div class="card-title">回測報告</div>
-                    <a href="/quant/output/report.html" target="_blank" class="btn btn-ghost" style="padding:4px 10px; font-size:12px;">在新分頁開啟 ↗</a>
+                    <div style="display:flex; gap:8px;">
+                        <a id="openLatest" href="/quant/output/report.html" target="_blank" class="btn btn-ghost" style="padding:4px 10px; font-size:12px;">在新分頁開啟 latest ↗</a>
+                    </div>
                 </div>
                 <iframe id="reportFrame" src="/quant/output/report.html?bust=${cacheBust}"
                     style="width:100%; height:2400px; border:1px solid var(--border); border-radius:8px; background:#0d1117;"
                     loading="lazy"></iframe>
+                <div id="recentReports" style="margin-top:8px; font-size:11px; color:var(--text-muted);"></div>
             </div>
         `;
 
@@ -300,11 +305,41 @@ const QuantPage = {
         try {
             const data = await FinMindAPI.quantStatus();
             document.getElementById('lastUpdate').textContent = data.last_update || '無';
+
             const rangeEl = document.getElementById('rangeInfo');
             if (data.range_start && data.range_end) {
                 rangeEl.textContent = `${data.range_start} ~ ${data.range_end}`;
             } else {
                 rangeEl.textContent = '—';
+            }
+
+            // v1.4 P3-5：顯示實際跑的參數 + 時間序檔名
+            const cfg = data.cfg || {};
+            const topNEl = document.getElementById('topNInfo');
+            const poolEl = document.getElementById('poolInfo');
+            topNEl.textContent = cfg.top_n != null ? `${cfg.top_n} 檔` : '—';
+            const poolSize = Array.isArray(cfg.pool) ? cfg.pool.length : (cfg.pool == null ? 'auto' : '—');
+            poolEl.textContent = `${poolSize} 檔`;
+
+            // 時間序檔名
+            const archiveEl = document.getElementById('archiveName');
+            const openLatest = document.getElementById('openLatest');
+            if (data.archive_html) {
+                archiveEl.textContent = `report.html (= ${data.archive_html})`;
+                openLatest.href = `/quant/output/${data.archive_html}`;
+            } else {
+                archiveEl.textContent = '/quant/output/report.html';
+                openLatest.href = '/quant/output/report.html';
+            }
+
+            // 最近 10 份報告列表
+            const recentEl = document.getElementById('recentReports');
+            if (Array.isArray(data.recent_reports) && data.recent_reports.length > 0) {
+                recentEl.innerHTML = '歷史報告：' + data.recent_reports.map(r =>
+                    `<a href="/quant/output/${r.name}" target="_blank" style="color:var(--text-muted); margin-right:12px; text-decoration:none;">${r.name}</a>`
+                ).join('');
+            } else {
+                recentEl.innerHTML = '';
             }
         } catch (e) {
             document.getElementById('lastUpdate').textContent = '查詢失敗';
@@ -367,14 +402,25 @@ const QuantPage = {
 
             const data = await FinMindAPI.quantRun(params);
 
+            // ── v1.4 P3-4 修補：async job_id 分支 ──
+            // 舊 bug：data.ok=true 就呼叫 pct(k.total_return)，但 run_quant_async 不回 kpis
+            //         → (undefined).toFixed(2) → 「Cannot read properties of undefined (reading 'toFixed')」
+            // 新行為：若 data.job_id 存在 → 改走 polling；完成後從 sync get_status() 拿 kpis
+            if (data.ok && data.job_id) {
+                await this._pollJob(data.job_id, msg);
+                return;  // _pollJob 會處理 btn.disabled / reloadReport
+            }
+
             if (data.ok) {
+                // 同步 fallback（向後相容：若 backend 改回同步版）
                 const k = data.kpis || {};
-                const pct = v => `${(v).toFixed(2)}%`;
+                const pctFmt = v => (v == null || isNaN(v)) ? '—' : `${(+v).toFixed(2)}%`;
+                const sharpeFmt = v => (v == null || isNaN(v)) ? '—' : `${(+v).toFixed(2)}`;
                 msg.innerHTML = `
                     <div class="kpi" style="background:rgba(63, 185, 80, 0.1); padding:12px; border-radius:8px; border-left:4px solid var(--green);">
                         <div class="label" style="color:var(--green); font-size:12px;">✅ 執行成功</div>
-                        <div style="font-size:13px; margin-top:4px;">總報酬: <strong>${pct(k.total_return)}</strong> &nbsp;|&nbsp; B&amp;H: ${pct(k.benchmark_return)} &nbsp;|&nbsp; Sharpe: ${k.sharpe}</div>
-                        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">耗時 ${data.elapsed_sec}s</div>
+                        <div style="font-size:13px; margin-top:4px;">總報酬: <strong>${pctFmt(k.total_return)}</strong> &nbsp;|&nbsp; B&amp;H: ${pctFmt(k.pool_benchmark_return)} &nbsp;|&nbsp; Sharpe: ${sharpeFmt(k.sharpe)}</div>
+                        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">耗時 ${data.elapsed_sec ?? '?'}s</div>
                     </div>
                 `;
                 this.reloadReport();
@@ -392,6 +438,101 @@ const QuantPage = {
             btn.disabled = false;
             btn.textContent = '🔄 重新跑回測';
         }
+    },
+
+    /**
+     * v1.4 P3-4：輪詢 async job 直到 done / error
+     * - 每 2 秒查一次 /api/quant_status?job_id=xxx
+     * - 顯示進度（progress_pct / stage）
+     * - 完成後從 sync get_status() 拿 kpis（讀 backtest_results.json）
+     * - 完成 / 失敗都還原按鈕
+     */
+    async _pollJob(jobId, msg) {
+        const btn = document.getElementById('runBtn');
+        const POLL_INTERVAL_MS = 2000;
+        const MAX_POLLS = 600;  // 最多 20 分鐘（1200s）
+        const startedAt = Date.now();
+
+        for (let i = 0; i < MAX_POLLS; i++) {
+            await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+
+            let status;
+            try {
+                status = await FinMindAPI.quantStatusById(jobId);
+            } catch (e) {
+                console.warn('poll status failed:', e);
+                continue;  // 網路抖動不要直接放棄
+            }
+
+            const elapsed = Math.round((Date.now() - startedAt) / 1000);
+            const pct = status.progress_pct ?? 0;
+            const stage = status.stage ?? status.status ?? '執行中';
+
+            msg.innerHTML = `
+                <div class="state-box" style="flex-direction:column; align-items:stretch; gap:6px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <div class="spinner"></div>
+                        <div>${this.esc(stage)}（${pct}%）</div>
+                    </div>
+                    <div style="background:var(--bg-soft); border-radius:4px; height:6px; overflow:hidden;">
+                        <div style="width:${pct}%; height:100%; background:var(--green); transition:width 0.3s;"></div>
+                    </div>
+                    <div style="font-size:11px; color:var(--text-muted);">已等待 ${elapsed}s · job_id: <code>${this.esc(jobId)}</code></div>
+                </div>
+            `;
+
+            if (status.status === 'done') {
+                await this._renderJobDone(msg);
+                return;
+            }
+            if (status.status === 'error') {
+                msg.innerHTML = `<div class="error-text">❌ 回測失敗：${this.esc(status.error || '未知錯誤')}</div>`;
+                btn.disabled = false;
+                btn.textContent = '🔄 重新跑回測';
+                return;
+            }
+        }
+
+        // timeout
+        msg.innerHTML = `<div class="error-text">❌ 回測逾時（${MAX_POLLS * POLL_INTERVAL_MS / 1000}s 無進度）。請到 <code>quant/progress/</code> 查看 job <code>${this.esc(jobId)}</code> 狀態。</div>`;
+        btn.disabled = false;
+        btn.textContent = '🔄 重新跑回測';
+    },
+
+    /**
+     * job done 後：抓 sync get_status()（讀 backtest_results.json 的 KPI）
+     * 顯示 KPI + reload iframe
+     */
+    async _renderJobDone(msg) {
+        const btn = document.getElementById('runBtn');
+        let kpis = {};
+        let lastUpdate = '';
+        try {
+            const sync = await FinMindAPI.quantStatus();
+            kpis = sync.kpis || {};
+            lastUpdate = sync.last_update || '';
+        } catch (e) {
+            console.warn('get sync status failed:', e);
+        }
+
+        const pctFmt = v => (v == null || isNaN(v)) ? '—' : `${(+v).toFixed(2)}%`;
+        const numFmt = v => (v == null || isNaN(v)) ? '—' : `${(+v).toFixed(2)}`;
+
+        msg.innerHTML = `
+            <div class="kpi" style="background:rgba(63, 185, 80, 0.1); padding:12px; border-radius:8px; border-left:4px solid var(--green);">
+                <div class="label" style="color:var(--green); font-size:12px;">✅ 執行成功</div>
+                <div style="font-size:13px; margin-top:4px;">
+                    總報酬: <strong>${pctFmt(kpis.total_return)}</strong>
+                    &nbsp;|&nbsp; B&amp;H: ${pctFmt(kpis.pool_benchmark_return)}
+                    &nbsp;|&nbsp; Sharpe: ${numFmt(kpis.sharpe)}
+                    ${kpis.market_alpha != null ? `&nbsp;|&nbsp; α(vs 0050): ${pctFmt(kpis.market_alpha)}` : ''}
+                </div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">${lastUpdate ? `報告時間 ${lastUpdate}` : ''}</div>
+            </div>
+        `;
+        this.reloadReport();
+        btn.disabled = false;
+        btn.textContent = '🔄 重新跑回測';
     },
 
     esc(s) {

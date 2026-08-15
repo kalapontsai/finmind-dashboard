@@ -216,6 +216,8 @@ def run(user_cfg: dict | None = None):
     if pool is None:
         pool = load_pool()
         log.info(f'從 pool.txt 載入 {len(pool)} 檔')
+    # v1.4 P3-6：寫回 cfg，後續 report.save() 才能顯示實際池大小（不要 fallback STOCK_POOL）
+    cfg['pool'] = pool
 
     # ── 2. Strategy 載入 ──
     log.info(f'載入 strategies...')
@@ -305,6 +307,9 @@ def run(user_cfg: dict | None = None):
         total_score=total_score,
         market_close=market_close,
     )
+    # v1.4 P3-6：BUILD POSITION 算出的 selected 一定要寫進 bt，
+    # 否則 report.save() 寫的 selected_monthly 會是空 dict。
+    bt.selected_monthly = selected
     # v1.4：標註除權息調整設定（供 report.py 顯示）
     bt.include_dividends = cfg.get('include_dividends', False)
     bt.adjust_method = cfg.get('adjust_method', 'none') if cfg.get('include_dividends', False) else 'none'
@@ -315,6 +320,19 @@ def run(user_cfg: dict | None = None):
         _inject_walk_forward_kpis(bt, split_date, train_pct)
 
     return bt
+
+
+def run_and_save(user_cfg: dict | None = None) -> tuple:
+    """
+    v1.4 P3-5：跑回測 + 寫檔一條龍
+    Returns: (result, save_meta)
+        save_meta = { html_latest, html_archive, json_latest, json_archive }
+    """
+    from quant.report import save
+    cfg = merge_config(user_cfg)
+    result = run(cfg)
+    meta = save(result, cfg)
+    return result, meta
 
 
 def _inject_walk_forward_kpis(bt, split_date: str, train_pct: float):

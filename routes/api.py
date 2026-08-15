@@ -446,26 +446,22 @@ def quant_status():
 
 @api_bp.get('/quant_pool')
 def quant_pool():
-    """回傳量化預設股票池（讀 quant/pool.json，沒有就用 26 檔預設）"""
-    pool_file = QUANT_DIR / 'pool.json'
-    if pool_file.is_file():
-        try:
-            data = json.loads(pool_file.read_text(encoding='utf-8'))
-            if isinstance(data, list):
-                stocks = [str(s).strip() for s in data if str(s).strip()]
-                # 去重 + 排序
-                stocks = sorted(set(stocks))
-                return jsonify({'count': len(stocks), 'stocks': stocks})
-        except (FinMindError, KeyError, ValueError, TypeError, json.JSONDecodeError):
-            pass
+    """回傳量化股票池（v1.4 P3-6：唯一來源是 `quant/pool.json`，沒有就 503）。
 
-    # 26 檔預設池（從 quant/config.py STOCK_POOL 拆出來）
-    default_pool = [
-        '0056', '00878', '00919', '1301', '1303', '1326', '2303', '2317', '2330',
-        '2357', '2379', '2382', '2412', '2454', '2603', '2609', '2881', '2882',
-        '2884', '2885', '2886', '2887', '2891', '3008', '3034', '3711',
-    ]
-    return jsonify({'count': len(default_pool), 'stocks': default_pool})
+    - 優先順序：pool.json → pool.txt (lib/pool_loader.load_pool)
+    - 若兩者都沒有 → 503 + 明確錯誤訊息（不再硬寫 26 檔預設）
+    """
+    from lib.pool_loader import load_pool
+    try:
+        stocks = load_pool()
+    except FileNotFoundError as e:
+        return _err(str(e), 503, hint='請先建立 quant/pool.txt 或 quant/pool.json')
+
+    return jsonify({
+        'count': len(stocks),
+        'stocks': stocks,
+        'source': 'pool.json' if (QUANT_DIR / 'pool.json').is_file() else 'pool.txt',
+    })
 
 
 # ────────────────────────── 量化策略（參數 + 使用者啟用/權重）─────────────────────────

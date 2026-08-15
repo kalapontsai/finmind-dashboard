@@ -30,8 +30,9 @@ def load_finmind_token() -> str:
 START_DATE = '2023-01-01'
 END_DATE = '2026-08-12'
 
-# === 3. 股票池（可自行擴充，最多 ~30 檔會比較好管理） ===
-# 範例：半導體 + 金融 + 電信 + 高股息 + ETF 龍頭
+# === 3. 股票池（v1.4 P3-6：DEPRECATED，請改用 quant/pool.json） ===
+# 來源改為 `quant/pool.txt`（手動編輯）→ `quant/pool.json`（lib/pool_loader.py sync）。
+# 讀取順序見 lib/pool_loader.load_pool()。這個變數只保留為 report.py 的最後 fallback。
 STOCK_POOL = [
     # 半導體
     '2330',  # 台積電

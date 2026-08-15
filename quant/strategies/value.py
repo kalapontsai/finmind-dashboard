@@ -13,7 +13,7 @@ from .base import BaseStrategy, StrategyResult
 class ValueStrategy(BaseStrategy):
     type_name = 'value'
     required_inputs = ('per',)
-    ascending = False  # 排名輸出：值越低 → pct 越高 → 所以用 ascending=False 反轉輸入
+    ascending = False  # 排名輸出：值越低 → pct 越高（pandas ascending=False：小值拿高 pct）
 
     @property
     def default_params(self) -> dict:
@@ -35,12 +35,10 @@ class ValueStrategy(BaseStrategy):
         lookback = max(int(self.params.get('lookback_days', 60)), 1)
 
         # PER 寬表：build_wide_tables 已 ffill 過；直接 reindex 對齊交易日曆
-        # 翻轉：ascending=False 對負 PER 是合理的（負的越低越好），但這裡 PE 是正值，
-        # 我們要「PE 低 → 排名高」。最簡潔：-pe 讓低值變高值，再 rank(ascending=False)
+        # ascending=False → pandas 把「值最小」排到最高 pct，正好符合「低 PE = 高分」
         raw = per.reindex(close.index).ffill()
-        raw_for_rank = -raw  # 反轉：低 PE 變高值 → 排名高
 
-        score = self.rank_pct(raw_for_rank, ascending=self.ascending)
+        score = self.rank_pct(raw, ascending=self.ascending)
         return StrategyResult(
             score=score,
             raw=raw,

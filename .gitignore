@@ -1,0 +1,33 @@
+# ===== Secrets =====
+# FinMind API token（必要排除；雙層 token 機制見 SKILL.md）
+config/finmind-api-key
+data/finmind_token.txt
+
+# ===== Python 編譯產物 =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.Python
+venv/
+env/
+
+# ===== Runtime cache（可重產生）=====
+data/price_cache/*
+!data/price_cache/.gitkeep
+data/reports/*
+!data/reports/.gitkeep
+data/analyze_cache/*
+
+# ===== 一般備用 =====
+*.log
+*.swp
+.DS_Store
+Thumbs.db
+logs/*
+!logs/.gitkeep
+
+# ===== venv =====
+.venv/
+config/finmind-api-key

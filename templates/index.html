@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>股票組合歷史回測 + N 年情境 · Portfolio Forecast</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>股票組合歷史回測 + N 年情境</h1>
+    <p class="sub">讀用戶名單（Csv）→ FinMind 抓歷史價 → 3 模式回測 → N-Year Rolling CAGR 情境終值</p>
+  </header>
+
+  <section class="card">
+    <h2>① 輸入</h2>
+    <form id="fAnalyze">
+      <div class="grid">
+        <div>
+          <label>用戶名單（CSV）</label>
+          <select name="profile" id="profileSel" required></select>
+          <small id="profileMeta" class="hint"></small>
+        </div>
+        <div>
+          <label>N 年（預估）</label>
+          <input type="number" name="n" value="10" min="1" max="50" required>
+        </div>
+        <div>
+          <label>目前資產 (PV)</label>
+          <input type="number" name="pv" value="10000000" min="0" required>
+        </div>
+        <div>
+          <label>權重（選填，例 2330:0.3,2317:0.7）</label>
+          <input type="text" name="weights" placeholder="不填 → 等權重">
+        </div>
+      </div>
+      <div class="actions">
+        <button type="submit" id="btnRun">開始分析</button>
+        <button type="button" id="btnExportPdf" disabled>匯出 PDF</button>
+        <button type="button" id="btnExportHtml" disabled>匯出 HTML</button>
+        <span id="status" class="status"></span>
+      </div>
+    </form>
+    <div id="err" class="err"></div>
+  </section>
+
+  <section id="out" hidden>
+
+    <div class="card">
+      <h2>② 個股歷史長度診斷</h2>
+      <div id="hist"></div>
+    </div>
+
+    <div class="card">
+      <h2>③ 歷史回測三模式結果</h2>
+      <div class="tabs">
+        <button class="tab active" data-mode="common">Common Period</button>
+        <button class="tab" data-mode="dynamic">Dynamic Entry</button>
+        <button class="tab" data-mode="full">Full Available History</button>
+      </div>
+      <div id="kpi" class="kpi"></div>
+      <div class="chart"><canvas id="navChart"></canvas></div>
+      <p class="hint">註：N/A 資料點不視為 0% 報酬，僅用當日有價股票重新正規化（Dynamic / Full）。</p>
+    </div>
+
+    <div class="card">
+      <h2>④ 未來 N 年情境終值</h2>
+      <div class="note">取 Portfolio NAV（Common 模式）所有 N-Year rolling CAGR 的分位數 → FV = PV × (1+r)^N。不模擬逐年路徑。</div>
+      <table id="fcTable">
+        <thead><tr>
+          <th>情境</th><th>分位數</th><th>歷史 N-Year CAGR</th>
+          <th>目前資產</th><th>N 年後</th><th>倍數</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="hint">歷史 N-Year rolling 樣本數：<b id="rCount">—</b></p>
+    </div>
+
+    <div class="card">
+      <h2>⑤ 歷史 N-Year Rolling CAGR 分布</h2>
+      <div class="chart small"><canvas id="rollChart"></canvas></div>
+    </div>
+
+  </section>
+
+  <footer class="foot">
+    <span>本工具為歷史回測情境參考，<b>不構成投資建議</b>。</span>
+    <span> · 資料來源：<a href="https://finmindtrade.com/" target="_blank" rel="noopener">FinMind</a></span>
+  </footer>
+</div>
+
+<script src="{{ url_for('static', filename='js/portfolio.js') }}"></script>
+</body>
+</html>

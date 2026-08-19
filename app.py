@@ -17,6 +17,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 from flask import (
     Flask, jsonify, render_template, request, send_from_directory, url_for,
 )
@@ -35,7 +36,10 @@ from lib.csv_loader import CSVLintError, list_profile_csvs, load_portfolio_csv  
 from lib.exporter import render_html_report, render_pdf_report  # noqa: E402
 from lib.finmind import FinMindClient, FinMindError, load_finmind_token  # noqa: E402
 from lib.forecast import ForecastError, build_forecast  # noqa: E402
-from lib.portfolio import BacktestError, build_portfolio, prices_to_pivot  # noqa: E402
+from lib.portfolio import (  # noqa: E402
+    BacktestError, build_benchmark, build_portfolio, compute_market_value,
+    per_stock_history, prices_to_pivot,
+)
 
 
 def create_app() -> Flask:
@@ -194,7 +198,15 @@ def _parse_weights(raw, tickers: list[str]) -> dict[str, float] | None:
 
 
 def _run_analyze(body: dict) -> dict:
-    """主分析流程：讀名單 → 抓價 → 三模式 → N-Year 預估 → 壓回 JSON"""
+    """主分析流程：
+    1) 讀名單 → FinMind TaiwanStockInfo 預先驗證 stock_id 存在 → 過濾假代號
+    2) 抓 first_trading_day + 標記歷史太短的股票
+    3) 抓 FinMind TaiwanStockPrice（只抓驗證過的）
+    4) 三模式回測
+    5) 計算起始市值（最後收盤價 × 股數）
+    6) N-Year 預估
+    7) 組裝回傳（含 bias 警告）
+    """
     # 1) 解析輸入
     profile = (body.get('profile') or '').strip()
     if not profile:
@@ -206,47 +218,171 @@ def _run_analyze(body: dict) -> dict:
         raise _BadInput(f'{profile}.csv 不存在')
 
     holdings = load_portfolio_csv(profile_path)
-    tickers = [h.ticker for h in holdings]
+    user_tickers = [h.ticker for h in holdings]
     shares_map = {h.ticker: h.shares for h in holdings}
 
     n = int(body.get('n', DEFAULT_N_YEARS))
     if n < 1 or n > 50:
         raise _BadInput('n 必須在 1~50 之間')
-    pv = float(body.get('pv', DEFAULT_PV))
-    if pv < 0:
-        raise _BadInput('pv 不可為負')
+    user_pv = body.get('pv')  # None = 自動用實際市值
     start_date = (body.get('start_date') or DEFAULT_START_DATE).strip()
     end_date = (body.get('end_date') or datetime.now().strftime('%Y-%m-%d')).strip()
-    weights = _parse_weights(body.get('weights'), tickers)
+    weights = _parse_weights(body.get('weights'), user_tickers)
 
-    # 2) 抓歷史價格
+    # 1.5) 交易成本（選填，預設 0 = 不計）
+    # Buy & hold 場景下，成本只作用在「初始買入」一次：
+    #   effective_pv = pv / (1 + fee_buy + slippage)
+    # 月/季 rebalancing 場景下則每次都抽。详細見 README。
+    fee_buy = float(body.get('fee_buy', 0) or 0)
+    fee_sell = float(body.get('fee_sell', 0) or 0)
+    tax_sell = float(body.get('tax_sell', 0) or 0)
+    slippage = float(body.get('slippage', 0) or 0)
+    if any(x < 0 or x > 0.1 for x in (fee_buy, fee_sell, tax_sell, slippage)):
+        raise _BadInput('fee/tax/slippage 應在 0~0.1（10%）之間')
+
+    # 1.6) Benchmark（選填）
+    benchmark_id = (body.get('benchmark') or '').strip() or None
+
+    # 2) 預先驗證：TaiwanStockInfo 抓清單 → match user ticker → 過濾假代號
     client = FinMindClient()
-    rows_by_ticker: dict[str, list[dict]] = {}
-    errors: dict[str, str] = {}
-    for sid in tickers:
-        try:
-            rows_by_ticker[sid] = client.get_stock_price(sid, start_date, end_date)
-        except FinMindError as e:
-            errors[sid] = str(e)
-    if not rows_by_ticker:
-        raise FinMindError(f'所有股票都抓不到歷史價格：{errors}')
-    if errors:
-        # 部分失敗不中斷，把成功的繼續算
-        for sid in list(rows_by_ticker.keys()):
-            if not rows_by_ticker[sid]:
-                rows_by_ticker.pop(sid, None)
+    try:
+        stock_list = client.get_stock_list()
+    except FinMindError as e:
+        raise _BadInput(f'FinMind TaiwanStockInfo 抓取失敗：{e}') from e
 
-    # 3) 轉 pivot
+    matched: dict[str, dict] = {}        # stock_id → match 結果（含 stock_name）
+    invalid_tickers: list[dict] = []     # [{user_input, reason}]
+    for ut in user_tickers:
+        m = client.match_ticker(ut)
+        if m is None:
+            invalid_tickers.append({
+                'user_input': ut,
+                'reason': f'在 TaiwanStockInfo 清單中查無此代號（可能是 typo 或已下市）',
+            })
+            continue
+        sid = m['stock_id']
+        if sid in matched:
+            # 同一檔被多個 user ticker match 到 → 累加股數
+            matched[sid]['matched_from'].append(ut)
+            continue
+        matched[sid] = {
+            'stock_id': sid,
+            'stock_name': m.get('stock_name', ''),
+            'industry_category': m.get('industry_category', ''),
+            'type': m.get('type', ''),
+            'source': m.get('source', ''),
+            'matched_from': [ut],
+        }
+
+    if not matched:
+        raise _BadInput(
+            '名單中所有 ticker 都不在 FinMind TaiwanStockInfo 清單內。'
+            '請檢查代號是否正確（例如 50 → 0050、6208 → 006208）。'
+        )
+
+    # 3) 抓 first_trading_day + 標記歷史太短
+    valid_stock_ids = list(matched.keys())
+    first_trading_days: dict[str, str | None] = {}
+    short_history: list[str] = []   # < N 年的 ticker
+    today_ts = pd.Timestamp(end_date)
+    n_years_ago = today_ts - pd.DateOffset(years=n)
+
+    for sid in valid_stock_ids:
+        try:
+            ftd = client.get_first_trading_day(sid)
+        except FinMindError:
+            ftd = None
+        first_trading_days[sid] = ftd
+        if ftd is None:
+            # 該股根本沒歷史股價
+            invalid_tickers.append({
+                'user_input': matched[sid]['matched_from'][0],
+                'stock_id': sid,
+                'reason': f'{sid}（{matched[sid].get("stock_name", "")}）查無任何歷史股價資料',
+            })
+            del matched[sid]
+        else:
+            ftd_ts = pd.Timestamp(ftd)
+            if ftd_ts > n_years_ago:
+                short_history.append(sid)
+
+    if not matched:
+        raise _BadInput('過濾掉無歷史資料的 ticker 後，沒有任何可用股票。請檢查名單。')
+
+    # 4) 抓歷史價格（只抓驗證過 + 有 first_trading_day 的）
+    final_stock_ids = list(matched.keys())
+    rows_by_ticker: dict[str, list[dict]] = {}
+    fetch_errors: dict[str, str] = {}
+    for sid in final_stock_ids:
+        try:
+            # 起點用 first_trading_day 避免浪費 API 額度
+            ftd = first_trading_days.get(sid, start_date)
+            actual_start = max(ftd, start_date) if ftd else start_date
+            rows_by_ticker[sid] = client.get_stock_price(sid, actual_start, end_date)
+        except FinMindError as e:
+            fetch_errors[sid] = str(e)
+    # 過濾空 list
+    for sid in list(rows_by_ticker.keys()):
+        if not rows_by_ticker[sid]:
+            del rows_by_ticker[sid]
+
+    if not rows_by_ticker:
+        raise FinMindError(f'驗證後的股票都抓不到歷史價格：{fetch_errors}')
+
+    # 5) 轉 pivot
     prices = prices_to_pivot(rows_by_ticker, price_col='close')
     if prices.empty:
         raise BacktestError('抓回的價格資料為空')
 
-    # 4) 三模式
+    # 6) 起始市值（用最後一個共同交易日的收盤價 × 股數）
+    # 累加同 stock_id 的股數
+    combined_shares: dict[str, int] = {}
+    for sid, info in matched.items():
+        for ut in info['matched_from']:
+            combined_shares[sid] = combined_shares.get(sid, 0) + shares_map[ut]
+
+    mv = compute_market_value(prices, combined_shares)
+    if user_pv is None:
+        raw_pv = mv['total']
+        pv_source = 'market_value'
+    else:
+        raw_pv = float(user_pv)
+        pv_source = 'user_input'
+        if raw_pv < 0:
+            raise _BadInput('pv 不可為負')
+
+    # 套用交易成本（Buy & hold：只在初始買入抽）
+    initial_cost_rate = fee_buy + slippage
+    if initial_cost_rate > 0 and pv_source == 'market_value':
+        # 成本只在「使用者沒手動指定 pv」時套用（因為手動 pv 已含/不含成本由使用者決定）
+        effective_pv = raw_pv / (1 + initial_cost_rate)
+        cost_text = f'（已扣買入手續費 {fee_buy*100:.3f}% + 滑價 {slippage*100:.3f}%）'
+    else:
+        effective_pv = raw_pv
+        cost_text = ''
+    pv = effective_pv
+    pv_raw = raw_pv
+    pv_cost_text = cost_text
+
+    # 7) 三模式
     common_res = build_portfolio(prices, mode='common', weights=weights)
     dynamic_res = build_portfolio(prices, mode='dynamic', weights=weights)
     full_res = build_portfolio(prices, mode='full', weights=weights)
 
-    # 5) N-Year 預估：優先用 Common，不夠則退回 Dynamic / Full（取 rolling_count 最大的）
+    # 7.5) Benchmark
+    benchmark = None
+    if benchmark_id:
+        try:
+            bench_rows = client.get_stock_price(benchmark_id, start_date, end_date)
+            bench_prices = prices_to_pivot({benchmark_id: bench_rows}, price_col='close')
+            if not bench_prices.empty:
+                # 裁到跟 dynamic 同期，公平對照
+                bench_prices = bench_prices.loc[:dynamic_res.nav.index[-1]] if not dynamic_res.nav.empty else bench_prices
+                benchmark = build_benchmark(bench_prices, ticker=benchmark_id)
+        except FinMindError as e:
+            benchmark = {'ticker': benchmark_id, 'error': str(e)}
+
+    # 8) N-Year 預估：優先用 Common，不夠則退回 Dynamic / Full
     forecast_basis = 'common'
     forecast = None
     for basis, res in (('common', common_res), ('dynamic', dynamic_res), ('full', full_res)):
@@ -263,31 +399,60 @@ def _run_analyze(body: dict) -> dict:
         )
     forecast['basis'] = forecast_basis
 
-    # 6) 組裝回傳
+    # 9) 個股歷史長度（加強版）
+    psh = per_stock_history(prices)
+
+    # 10) 組裝回傳
+    overview = {
+        'stocks': len(matched),
+        'min_years': min((v['years'] for v in psh.values()), default=0),
+        'median_years': sorted([v['years'] for v in psh.values()])[len(psh) // 2] if psh else 0,
+        'max_years': max((v['years'] for v in psh.values()), default=0),
+    }
+
     return {
         'inputs': {
             'profile': profile,
-            'tickers': tickers,
+            'user_tickers': user_tickers,
+            'tickers': final_stock_ids,  # 驗證後的 stock_id 清單
             'shares': shares_map,
+            'combined_shares': combined_shares,
             'n': n,
             'pv': pv,
+            'pv_raw': pv_raw,
+            'pv_source': pv_source,
+            'pv_cost_text': pv_cost_text,
+            'fees': {
+                'fee_buy': fee_buy,
+                'fee_sell': fee_sell,
+                'tax_sell': tax_sell,
+                'slippage': slippage,
+            },
             'start_date': start_date,
             'end_date': end_date,
             'weights': weights,
-            'fetch_errors': errors,
+            'invalid_tickers': invalid_tickers,
+            'first_trading_days': first_trading_days,
+            'short_history': short_history,
+            'fetch_errors': fetch_errors,
+            'ticker_match': {sid: {
+                'stock_id': sid,
+                'stock_name': info['stock_name'],
+                'industry': info['industry_category'],
+                'type': info['type'],
+                'source': info['source'],
+                'matched_from': info['matched_from'],
+            } for sid, info in matched.items()},
         },
+        'market_value': mv,
+        'benchmark': benchmark,
         'common': _serialize_result(common_res),
         'dynamic': _serialize_result(dynamic_res),
         'full': _serialize_result(full_res),
         'forecast': forecast,
         'history': {
-            'overview': {
-                'stocks': dynamic_res.history_diag['stocks'],
-                'min_years': dynamic_res.history_diag['min_years'],
-                'median_years': dynamic_res.history_diag['median_years'],
-                'max_years': dynamic_res.history_diag['max_years'],
-            },
-            'all_per_stock': dynamic_res.history_diag['per_stock'],
+            'overview': overview,
+            'per_stock': psh,
         },
         'nav_series': {
             'common': _downsample_nav(common_res.nav),

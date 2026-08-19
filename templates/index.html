@@ -29,11 +29,29 @@
         </div>
         <div>
           <label>目前資產 (PV)</label>
-          <input type="number" name="pv" value="10000000" min="0" required>
+          <input type="number" name="pv" placeholder="不填 → 自動用市值" min="0">
+          <small class="hint">不填 = 最後收盤價 × 股數</small>
         </div>
         <div>
-          <label>權重（選填，例 2330:0.3,2317:0.7）</label>
-          <input type="text" name="weights" placeholder="不填 → 等權重">
+          <label>權重（選填）</label>
+          <input type="text" name="weights" placeholder="不填 → 等權重，例 2330:0.3,2317:0.7">
+        </div>
+        <div>
+          <label>Benchmark（選填）</label>
+          <input type="text" name="benchmark" placeholder="例 0050、006208、2330">
+          <small class="hint">對照組股票代號</small>
+        </div>
+        <div>
+          <label>買入手續費 (%)</label>
+          <input type="number" name="fee_buy" value="0" min="0" max="10" step="0.001">
+        </div>
+        <div>
+          <label>賣出證交稅 (%)</label>
+          <input type="number" name="tax_sell" value="0" min="0" max="10" step="0.001">
+        </div>
+        <div>
+          <label>滑價 (%)</label>
+          <input type="number" name="slippage" value="0" min="0" max="10" step="0.001">
         </div>
       </div>
       <div class="actions">
@@ -48,13 +66,25 @@
 
   <section id="out" hidden>
 
-    <div class="card">
-      <h2>② 個股歷史長度診斷</h2>
+    <div class="card" id="tickerMatchCard">
+      <h2>② Ticker 驗證結果</h2>
+      <p class="hint">從 FinMind TaiwanStockInfo 拿上市櫃清單，自動補 0 + match 個股名稱。</p>
+      <div id="tickerMatch"></div>
+    </div>
+
+    <div class="card" id="mvCard">
+      <h2>③ 組合起始市值</h2>
+      <p class="hint">以「最新收盤價 × 股數」自動計算（取代固定 10M）。</p>
+      <div id="mv"></div>
+    </div>
+
+    <div class="card" id="historyCard">
+      <h2>④ 個股歷史長度診斷</h2>
       <div id="hist"></div>
     </div>
 
     <div class="card">
-      <h2>③ 歷史回測三模式結果</h2>
+      <h2>⑤ 歷史回測三模式結果</h2>
       <div class="tabs">
         <button class="tab active" data-mode="common">Common Period</button>
         <button class="tab" data-mode="dynamic">Dynamic Entry</button>
@@ -66,8 +96,8 @@
     </div>
 
     <div class="card">
-      <h2>④ 未來 N 年情境終值</h2>
-      <div class="note">取 Portfolio NAV（Common 模式）所有 N-Year rolling CAGR 的分位數 → FV = PV × (1+r)^N。不模擬逐年路徑。</div>
+      <h2>⑥ 未來 N 年情境終值</h2>
+      <div class="note" id="forecastNote">取 Portfolio NAV（<span id="fcBasis">—</span> 模式）所有 N-Year rolling CAGR 的分位數 → FV = PV × (1+r)^N。不模擬逐年路徑。</div>
       <table id="fcTable">
         <thead><tr>
           <th>情境</th><th>分位數</th><th>歷史 N-Year CAGR</th>
@@ -79,8 +109,25 @@
     </div>
 
     <div class="card">
-      <h2>⑤ 歷史 N-Year Rolling CAGR 分布</h2>
+      <h2>⑦ 歷史 N-Year Rolling CAGR 分布</h2>
       <div class="chart small"><canvas id="rollChart"></canvas></div>
+    </div>
+
+    <div class="card" id="benchCard" hidden>
+      <h2>⑧ Benchmark 對照</h2>
+      <div id="bench"></div>
+    </div>
+
+    <div class="card warn">
+      <h2>⚠️ 研究限制提醒</h2>
+      <ul>
+        <li><b>Survivorship Bias</b>：本名單是 2026 年仍存在的持股。若用來回測 2010-2020，這段期間下市的股票已被默默排除，會高估歷史報酬。</li>
+        <li><b>Look-Ahead Bias</b>：本工具使用的權重 / 持股是「現在的決定」，不模擬「當時不知道的未來」。</li>
+        <li><b>股利/除權息</b>：FinMind TaiwanStockPrice 的 <code>close</code> 為「調整後收盤價」（adj_close），已含除權息還原。 CAGR 含股利再投資效果。</li>
+        <li><b>交易成本</b>：本版未計手續費 / 證交稅 / 滑價。實際買入需扣 0.1425% 手續費、賣出再扣 0.3% 證交稅。</li>
+        <li><b>Forecast 語意</b>：P10/P50/P90 是「歷史上相同 N 年持有期間的結果分布」，<b>不是未來保證</b>。</li>
+        <li><b>資料不完整</b>：6 個字母型 ETF（00980A/00981A/00988A/009816/009805/00713）為 2017 後新上市，歷史 < 10 年，不適合 10Y 預估。</li>
+      </ul>
     </div>
 
   </section>

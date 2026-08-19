@@ -194,6 +194,30 @@ def _metrics(nav: pd.Series) -> dict:
     }
 
 
+# ───────── Benchmark 對照 ─────────
+def build_benchmark(
+    bench_prices: pd.DataFrame,
+    ticker: str = 'BENCH',
+) -> dict:
+    """
+    拿單一 ticker 的股價算 benchmark 指標（對照組）。
+    同一個价格序列、同一套 metrics 公式。
+    """
+    if bench_prices.empty or ticker not in bench_prices.columns:
+        return {'ticker': ticker, 'metrics': None}
+    s = bench_prices[ticker].dropna()
+    if len(s) < 2:
+        return {'ticker': ticker, 'metrics': None}
+    nav = s / s.iloc[0]
+    metrics = _metrics(nav)
+    return {
+        'ticker': ticker,
+        'stock_id': ticker,
+        'metrics': metrics,
+        'nav': [{'date': str(d.date()), 'nav': float(v)} for d, v in nav.items()],
+    }
+
+
 def _history_diag(prices: pd.DataFrame) -> dict:
     """計算每支股票的歷史長度（年）"""
     per_stock = {}
@@ -237,3 +261,88 @@ def prices_to_pivot(rows_by_ticker: dict[str, list[dict]], price_col: str = 'clo
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, axis=1).sort_index()
+
+
+# ───────── 工具：起始市值（最後收盤價 × 股數）─────────
+def compute_market_value(
+    prices: pd.DataFrame,
+    shares: dict[str, int],
+    as_of: str | None = None,
+) -> dict:
+    """
+    計算組合當前市值。
+    prices: pivot 表（index=Date, columns=Ticker, values=close）
+    shares: {ticker: 股數}
+    as_of: 'YYYY-MM-DD' 或 None（None = 最後一個共同交易日）
+    回傳：
+      {
+        'as_of': str (date),
+        'total': int (總市值),
+        'per_stock': [{ticker, close, shares, value}],
+        'missing': [ticker, ...]  # 該 ticker 在該日沒資料
+      }
+    """
+    if prices.empty or not shares:
+        return {'as_of': None, 'total': 0, 'per_stock': [], 'missing': list(shares.keys())}
+
+    if as_of:
+        # 找 <= as_of 的最後一個共同交易日
+        target = pd.Timestamp(as_of)
+        mask = prices.index <= target
+        if not mask.any():
+            target_date = prices.index[0]
+        else:
+            target_date = prices.index[mask][-1]
+    else:
+        target_date = prices.index[-1]
+
+    per_stock = []
+    missing = []
+    total = 0
+    for t, n in shares.items():
+        if t not in prices.columns:
+            missing.append(t)
+            continue
+        close = float(prices.loc[:target_date, t].dropna().iloc[-1]) if prices.loc[:target_date, t].notna().any() else 0
+        if close <= 0:
+            missing.append(t)
+            continue
+        value = int(round(close * n))
+        total += value
+        per_stock.append({
+            'ticker': t,
+            'close': round(close, 2),
+            'shares': n,
+            'value': value,
+        })
+
+    return {
+        'as_of': str(target_date.date()),
+        'total': int(total),
+        'per_stock': per_stock,
+        'missing': missing,
+    }
+
+
+# ───────── 工具：個股歷史長度診斷（加強版）─────────
+def per_stock_history(
+    prices: pd.DataFrame,
+    shares: dict[str, int] | None = None,
+) -> dict:
+    """
+    計算每支股票的歷史長度（年）+ 在 shares 中可買到的初始市值（用最早一天的價格）
+    """
+    per = {}
+    for t in prices.columns:
+        s = prices[t].dropna()
+        if s.empty:
+            per[t] = {'years': 0.0, 'first_date': None, 'last_date': None, 'rows': 0, 'first_close': None}
+            continue
+        per[t] = {
+            'years': round((s.index[-1] - s.index[0]).days / 365.25, 2),
+            'first_date': str(s.index[0].date()),
+            'last_date': str(s.index[-1].date()),
+            'rows': int(len(s)),
+            'first_close': round(float(s.iloc[0]), 2),
+        }
+    return per

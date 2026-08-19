@@ -40,23 +40,80 @@
   </div>
 
   <div class="card">
-    <h2>一、個股歷史長度診斷</h2>
-    {% if analyze.history.all_per_stock %}
-    <table>
-      <thead><tr><th>股票代號</th><th>歷史年數</th></tr></thead>
+    <h2>〇、組合起始市值</h2>
+    {% if analyze.market_value %}
+    <div class="kpi" style="grid-template-columns: repeat(3, 1fr);">
+      <div><small>估值日</small><b>{{ analyze.market_value.as_of }}</b></div>
+      <div><small>組合市值</small><b>{{ "{:,}".format(analyze.market_value.total) }}</b></div>
+      <div><small>來源</small><b style="font-size:13px">{{ analyze.inputs.pv_source or '—' }}</b></div>
+    </div>
+    <table style="margin-top:12px">
+      <thead><tr><th>股票</th><th>股數</th><th>收盤價</th><th>市值</th><th>權重</th></tr></thead>
       <tbody>
-      {% for t, yrs in (analyze.history.all_per_stock|dictsort) %}
-        <tr><td>{{ t }}</td><td>{{ "%.2f"|format(yrs) }}</td></tr>
+      {% for s in analyze.market_value.per_stock|sort(attribute='value', reverse=true) %}
+        <tr>
+          <td>{{ s.ticker }}</td>
+          <td>{{ "{:,}".format(s.shares) }}</td>
+          <td>{{ "%.2f"|format(s.close) }}</td>
+          <td>{{ "{:,}".format(s.value) }}</td>
+          <td>{{ "%.1f"|format(s.value / analyze.market_value.total * 100) }}%</td>
+        </tr>
       {% endfor %}
       </tbody>
-      <tfoot>
-        <tr><th>最短 / 中位 / 最長</th><td>
-          {{ "%.2f"|format(analyze.history.overview.min_years) }} /
-          {{ "%.2f"|format(analyze.history.overview.median_years) }} /
-          {{ "%.2f"|format(analyze.history.overview.max_years) }} 年
-        </td></tr>
-        <tr><th>股票數</th><td>{{ analyze.history.overview.stocks }}</td></tr>
-      </tfoot>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>〇.五、Ticker 驗證結果</h2>
+    {% if analyze.inputs.ticker_match %}
+    <table>
+      <thead><tr>
+        <th>stock_id</th><th>名稱</th><th>市場</th><th>使用者原始</th><th>備註</th>
+      </tr></thead>
+      <tbody>
+        {% for m in (analyze.inputs.ticker_match.values()|list|sort(attribute='stock_id')) %}
+        {% set short_set = analyze.inputs.short_history or [] %}
+        <tr {% if m.stock_id in short_set %}style="color:#b42318"{% endif %}>
+          <td>{{ m.stock_id }}{% if m.source != 'exact' %} <small>(原 {{ m.matched_from[0] }})</small>{% endif %}</td>
+          <td>{{ m.stock_name or '—' }}</td>
+          <td>{{ m.type or '—' }}</td>
+          <td>{{ m.matched_from | join(', ') }}</td>
+          <td>{% if m.stock_id in short_set %}⚠️ 歷史 < {{ analyze.forecast.n }} 年{% else %}✓{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if analyze.inputs.invalid_tickers %}
+    <div class="err" style="display:block; margin-top:8px">
+      以下代號在 FinMind TaiwanStockInfo 查無資料：<br>
+      {% for x in analyze.inputs.invalid_tickers %}{{ x.user_input }}：{{ x.reason }}<br>{% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>一、個股歷史長度診斷</h2>
+    {% set short_set = analyze.inputs.short_history or [] %}
+    {% if analyze.history.per_stock %}
+    <table>
+      <thead><tr>
+        <th>股票</th><th>第一天</th><th>最後一天</th>
+        <th>資料點</th><th>歷史年數</th><th>首日收盤</th>
+      </tr></thead>
+      <tbody>
+      {% for t, info in (analyze.history.per_stock|dictsort) %}
+        <tr {% if t in short_set %}style="color:#b42318"{% endif %}>
+          <td>{{ t }}{% if t in short_set %} ⚠️{% endif %}</td>
+          <td>{{ info.first_date or '—' }}</td>
+          <td>{{ info.last_date or '—' }}</td>
+          <td>{{ info.rows }}</td>
+          <td>{{ "%.2f"|format(info.years) }}</td>
+          <td>{{ "%.2f"|format(info.first_close) if info.first_close is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
     </table>
     {% endif %}
   </div>
@@ -84,7 +141,7 @@
   <div class="card">
     <h2>三、未來 N 年情境終值</h2>
     <div class="note">
-      取 Portfolio NAV 的歷史 N-Year rolling CAGR 對應分位數，
+      取 Portfolio NAV 的歷史 N-Year rolling CAGR 對應分位數（基於 <b>{{ analyze.forecast.basis or '—' }}</b> 模式），
       以 PV × (1+r)^N 計算 N 年後終值。僅回答「歷史上相同持有期間曾經出現的結果分布」，
       不構成未來保證或投資建議。
     </div>
@@ -109,6 +166,17 @@
     </table>
     <p class="meta">歷史 N-Year rolling 樣本數：<b>{{ analyze.forecast.rolling_count }}</b></p>
     {% endif %}
+  </div>
+
+  <div class="card warn">
+    <h2>四、研究限制提醒</h2>
+    <ul>
+      <li><b>Survivorship Bias</b>：本名單是 2026 年仍存在的持股。若用來回測 2010-2020，這段期間下市的股票已被默默排除，會高估歷史報酬。</li>
+      <li><b>Look-Ahead Bias</b>：本工具使用的權重 / 持股是「現在的決定」，不模擬「當時不知道的未來」。</li>
+      <li><b>股利/除權息</b>：FinMind TaiwanStockPrice 的 <code>close</code> 為「調整後收盤價」（adj_close），已含除權息還原。CAGR 含股利再投資效果。</li>
+      <li><b>交易成本</b>：本版未計手續費 / 證交稅 / 滑價。實際買入需扣 0.1425% 手續費、賣出再扣 0.3% 證交稅。</li>
+      <li><b>Forecast 語意</b>：P10/P50/P90 是「歷史上相同 N 年持有期間的結果分布」，<b>不是未來保證</b>。</li>
+    </ul>
   </div>
 
   <div class="footer">

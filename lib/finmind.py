@@ -186,6 +186,110 @@ class FinMindClient:
                     seen.add(z)
         return out
 
+    # ────────── TaiwanStockInfo：上市櫃總覽 + 預先驗證 ──────────
+    STOCK_LIST_CACHE_FILE = None  # 設在 __init__（需要 path）
+
+    def get_stock_list(self, use_cache: bool = True, ttl: int = 86400) -> list[dict]:
+        """
+        全上市櫃股票清單（24h cache）。
+        每檔回傳 {stock_id, stock_name, industry_category, type, date}，
+        date 是 FinMind 把該檔納入清單的日期。
+        用來：
+        1) 預先驗證 user 給的 ticker 是否存在（避免 713 這種「根本不存在」卻回傳假資料的陷阱）
+        2) 自動 match 代號格式（50 → 0050、6208 → 006208）
+        """
+        cache_file = self.cache_dir / 'stock_list.json'
+        if use_cache and cache_file.is_file():
+            try:
+                mtime = cache_file.stat().st_mtime
+                if time.time() - mtime < ttl:
+                    cached = json.loads(cache_file.read_text(encoding='utf-8'))
+                    if isinstance(cached, list):
+                        return cached
+            except (json.JSONDecodeError, OSError):
+                pass
+        rows = self.query('TaiwanStockInfo')
+        # 只留每檔最新一筆（避免同 stock_id 多筆）
+        by_id: dict[str, dict] = {}
+        for r in rows:
+            sid = r.get('stock_id')
+            if not sid:
+                continue
+            r_date = r.get('date', '')
+            if sid not in by_id or by_id[sid].get('date', '') < r_date:
+                by_id[sid] = r
+        result = sorted(by_id.values(), key=lambda r: r['stock_id'])
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
+        except OSError:
+            pass
+        return result
+
+    def get_stock_info(self, stock_id: str) -> dict | None:
+        """查單一檔基本資料（從本地清單快取查）。找不到 → None。"""
+        stock_id = stock_id.strip()
+        if not stock_id:
+            return None
+        # 先試直接 match
+        for r in self.get_stock_list():
+            if r.get('stock_id') == stock_id:
+                return r
+        # 試 variants
+        for cand in self._ticker_variants(stock_id):
+            for r in self.get_stock_list():
+                if r.get('stock_id') == cand:
+                    return r
+        return None
+
+    def match_ticker(self, user_input: str) -> dict | None:
+        """
+        用 TaiwanStockInfo 清單把使用者輸入的代號 match 到正確的 stock_id。
+        回傳 {stock_id, stock_name, industry_category, type, source} 或 None（找不到）。
+        source: 'exact' / 'padded_4' / 'padded_6' / 'upper' / 'name_partial'
+        """
+        ui = user_input.strip()
+        if not ui:
+            return None
+        slist = self.get_stock_list()
+        # 1) exact match
+        for r in slist:
+            if r['stock_id'] == ui:
+                return {**r, 'source': 'exact'}
+        # 2) variants
+        for cand in self._ticker_variants(ui):
+            for r in slist:
+                if r['stock_id'] == cand:
+                    return {**r, 'source': 'padded' if cand != ui else 'exact'}
+        # 3) stock_name 內含（給中文名）
+        for r in slist:
+            if ui in r.get('stock_name', ''):
+                return {**r, 'source': 'name_partial'}
+        return None
+
+    def get_first_trading_day(self, stock_id: str) -> str | None:
+        """
+        查該 stock_id 最早一筆股價的日期（YYYY-MM-DD）。
+        用來:
+        1) 預先知道個股有資料的第一天（避免「股齡太短」進 N-Year 預估）
+        2) 過濾掉 FinMind 對「不存在的 stock_id」回傳的 0 筆 / 假資料
+        """
+        try:
+            rows = self.query('TaiwanStockPrice', {
+                'data_id': stock_id,
+                'start_date': '1990-01-01',
+                'end_date': datetime.now().strftime('%Y-%m-%d'),
+            })
+        except FinMindError:
+            return None
+        if not rows:
+            return None
+        # 過濾掉顯然是「預設填入」的垃圾資料（價 0 / 0.01）
+        real = [r for r in rows if float(r.get('close', 0) or 0) > 0.5]
+        if not real:
+            return None
+        return real[0]['date']
+
     # ────────── 批次抓多股 ──────────
     def get_many_prices(
         self,

@@ -101,8 +101,12 @@
     const body = {
       profile: f.profile.value,
       n: parseInt(f.n.value, 10),
-      pv: parseFloat(f.pv.value),
+      pv: f.pv.value ? parseFloat(f.pv.value) : null,
       weights: f.weights.value.trim() || null,
+      benchmark: f.benchmark.value.trim() || null,
+      fee_buy: parseFloat(f.fee_buy.value || 0) / 100,
+      tax_sell: parseFloat(f.tax_sell.value || 0) / 100,
+      slippage: parseFloat(f.slippage.value || 0) / 100,
     };
 
     try {
@@ -129,24 +133,125 @@
     }
   }
 
-  // ────────── 渲染：歷史診斷 ──────────
-  function renderHistory(d) {
-    const wrap = $('hist');
-    const per = d.history.all_per_stock || {};
-    const ov = d.history.overview || {};
-    const rows = Object.entries(per)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([t, y]) => `<tr><td>${t}</td><td>${Number(y).toFixed(2)} 年</td></tr>`)
+  // ────────── 渲染：Ticker 驗證結果 ──────────
+  function renderTickerMatch(d) {
+    const wrap = $('tickerMatch');
+    const ins = d.inputs;
+    const tm = ins.ticker_match || {};
+    const invalid = ins.invalid_tickers || [];
+    const short = new Set(ins.short_history || []);
+
+    const matchedRows = Object.values(tm)
+      .sort((a, b) => a.stock_id.localeCompare(b.stock_id))
+      .map((m) => {
+        const isShort = short.has(m.stock_id);
+        const tag = m.source === 'exact' ? '' : '<small class="hint">(原 ' + m.matched_from[0] + ')</small>';
+        const shortWarn = isShort ? ' <b style="color:#b42318">⚠️ 歷史 < ' + (ins.n || 10) + ' 年</b>' : '';
+        return `<tr>
+          <td>${m.stock_id}${tag}</td>
+          <td>${m.stock_name || '—'}</td>
+          <td>${m.industry || '—'}</td>
+          <td>${m.type || '—'}</td>
+          <td>${m.matched_from.join(', ')}</td>
+          <td>${shortWarn}</td>
+        </tr>`;
+      })
       .join('');
+
+    let invalidHtml = '';
+    if (invalid.length > 0) {
+      invalidHtml = `<div class="err show" style="margin-top:12px">
+        <b>⚠️ 以下代號在 FinMind TaiwanStockInfo 查無資料，會被略過：</b>
+        <ul>${invalid.map(x => `<li>${x.user_input}${x.stock_id ? ' → ' + x.stock_id : ''}：${x.reason}</li>`).join('')}</ul>
+      </div>`;
+    }
+
     wrap.innerHTML = `
       <table>
-        <thead><tr><th>股票代號</th><th>歷史年數</th></tr></thead>
+        <thead><tr>
+          <th>stock_id</th><th>名稱</th><th>產業</th><th>市場</th>
+          <th>使用者原始輸入</th><th>備註</th>
+        </tr></thead>
+        <tbody>${matchedRows || '<tr><td colspan="6" class="hint">無有效 ticker</td></tr>'}</tbody>
+      </table>
+      ${invalidHtml}
+    `;
+  }
+
+  // ────────── 渲染：組合起始市值 ──────────
+  function renderMarketValue(d) {
+    const wrap = $('mv');
+    const ins = d.inputs;
+    const mv = d.market_value || {};
+    const per = mv.per_stock || [];
+    const missing = mv.missing || [];
+
+    const rows = per
+      .sort((a, b) => b.value - a.value)
+      .map((s) => {
+        const pct = mv.total > 0 ? (s.value / mv.total * 100).toFixed(1) : '0.0';
+        return `<tr>
+          <td>${s.ticker}</td>
+          <td>${fmtMoney(s.shares)}</td>
+          <td>${fmtFloat(s.close, 2)}</td>
+          <td>${fmtMoney(s.value)}</td>
+          <td>${pct}%</td>
+        </tr>`;
+      })
+      .join('');
+
+    const pvSourceText = ins.pv_source === 'market_value'
+      ? '（自動從收盤價 × 股數計算）'
+      : '（使用者手動輸入）';
+
+    wrap.innerHTML = `
+      <div class="kpi" style="grid-template-columns: repeat(3, 1fr);">
+        <div><small>估值日</small><b>${mv.as_of || '—'}</b></div>
+        <div><small>組合市值（PV）</small><b style="color:#17365d">${fmtMoney(mv.total)}</b></div>
+        <div><small>市值來源</small><b style="font-size:14px">${pvSourceText}</b></div>
+      </div>
+      <table style="margin-top:14px">
+        <thead><tr><th>股票</th><th>股數</th><th>收盤價</th><th>市值</th><th>權重</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="hint">無資料</td></tr>'}</tbody>
+      </table>
+      ${missing.length > 0 ? `<p class="err">缺少價格資料：${missing.join(', ')}</p>` : ''}
+    `;
+  }
+
+  // ────────── 渲染：歷史診斷（per-stock 加強版）──────────
+  function renderHistory(d) {
+    const wrap = $('hist');
+    const per = d.history.per_stock || {};
+    const ov = d.history.overview || {};
+    const ins = d.inputs;
+    const short = new Set(ins.short_history || []);
+
+    const rows = Object.entries(per)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([t, info]) => {
+        const warn = short.has(t) ? ' <b style="color:#b42318">⚠️</b>' : '';
+        return `<tr>
+          <td>${t}${warn}</td>
+          <td>${info.first_date || '—'}</td>
+          <td>${info.last_date || '—'}</td>
+          <td>${info.rows || 0}</td>
+          <td>${(info.years || 0).toFixed(2)}</td>
+          <td>${info.first_close != null ? fmtFloat(info.first_close, 2) : '—'}</td>
+        </tr>`;
+      })
+      .join('');
+
+    wrap.innerHTML = `
+      <table>
+        <thead><tr>
+          <th>股票</th><th>第一天</th><th>最後一天</th>
+          <th>資料點</th><th>歷史年數</th><th>首日收盤</th>
+        </tr></thead>
         <tbody>${rows}</tbody>
         <tfoot>
-          <tr><th>股票數</th><td>${ov.stocks || 0}</td></tr>
-          <tr><th>最短 / 中位 / 最長</th><td>
-            ${(ov.min_years || 0).toFixed(2)} / ${(ov.median_years || 0).toFixed(2)} / ${(ov.max_years || 0).toFixed(2)} 年
-          </td></tr>
+          <tr><th>股票數</th><td colspan="2">${ov.stocks || 0}</td>
+            <th>最短 / 中位 / 最長</th>
+            <td colspan="2">${(ov.min_years || 0).toFixed(2)} / ${(ov.median_years || 0).toFixed(2)} / ${(ov.max_years || 0).toFixed(2)} 年</td></tr>
         </tfoot>
       </table>`;
   }
@@ -213,6 +318,9 @@
   // ────────── 渲染：Forecast ──────────
   function renderForecast(d) {
     const f = d.forecast;
+    $('fcBasis').textContent = f.basis || 'common';
+    const f = d.forecast;
+    $('fcBasis').textContent = f.basis || 'common';
     const tb = $('fcTable').querySelector('tbody');
     tb.innerHTML = (f.scenarios || [])
       .map((s) => {
@@ -228,6 +336,7 @@
       })
       .join('');
     $('rCount').textContent = f.rolling_count;
+    $('forecastNote').textContent = `取 Portfolio NAV（${f.basis || 'common'} 模式）所有 N-Year rolling CAGR 的分位數 → FV = PV × (1+r)^N。不模擬逐年路徑。` + (d.inputs.pv_cost_text || '');
 
     const rs = f.rolling || [];
     if (rollChart) rollChart.destroy();
@@ -261,10 +370,48 @@
 
   // ────────── 全部渲染 ──────────
   function renderAll(d) {
+    renderTickerMatch(d);
+    renderMarketValue(d);
     renderHistory(d);
     renderMode(currentMode);
     renderForecast(d);
+    renderBenchmark(d);
     $('out').hidden = false;
+  }
+
+  function renderBenchmark(d) {
+    const card = $('benchCard');
+    const wrap = $('bench');
+    const b = d.benchmark;
+    if (!b || !b.metrics) { card.hidden = true; return; }
+    card.hidden = false;
+    const m = b.metrics;
+    const baseMetrics = (d.dynamic && d.dynamic.metrics) || (d.common && d.common.metrics) || {};
+    const rows = [
+      ['年數', fmtFloat(m.years, 2), fmtFloat(baseMetrics.years, 2)],
+      ['CAGR', fmtPct(m.cagr), fmtPct(baseMetrics.cagr)],
+      ['MDD', fmtPct(m.mdd), fmtPct(baseMetrics.mdd)],
+      ['Vol', fmtPct(m.volatility), fmtPct(baseMetrics.volatility)],
+      ['Sharpe', fmtFloat(m.sharpe, 3), fmtFloat(baseMetrics.sharpe, 3)],
+    ];
+    const delta = (a, b) => (a - b);
+    const diffClass = (bench, port) => {
+      const d = bench - port;
+      if (Math.abs(d) < 0.001) return '';
+      return d > 0 ? ' style="color:#3fb950"' : ' style="color:#f85149"';
+    };
+    wrap.innerHTML = `
+      <table>
+        <thead><tr><th>指標</th><th>Benchmark ${b.ticker}</th><th>組合 (Dynamic)</th></tr></thead>
+        <tbody>
+          <tr><td>年數</td><td>${fmtFloat(m.years, 2)}</td><td>${fmtFloat(baseMetrics.years, 2)}</td></tr>
+          <tr><td>CAGR</td><td${diffClass(m.cagr, baseMetrics.cagr)}>${fmtPct(m.cagr)}</td><td>${fmtPct(baseMetrics.cagr)}</td></tr>
+          <tr><td>MDD</td><td${diffClass(baseMetrics.mdd, m.mdd)}>${fmtPct(m.mdd)}</td><td>${fmtPct(baseMetrics.mdd)}</td></tr>
+          <tr><td>Vol</td><td>${fmtPct(m.volatility)}</td><td>${fmtPct(baseMetrics.volatility)}</td></tr>
+          <tr><td>Sharpe</td><td${diffClass(m.sharpe, baseMetrics.sharpe)}>${fmtFloat(m.sharpe, 3)}</td><td>${fmtFloat(baseMetrics.sharpe, 3)}</td></tr>
+        </tbody>
+      </table>
+      <p class="hint">差異以綠/紅標示：綠色 = 該指標 <b>正向優勢</b>（CAGR/Sharpe 越高越好；MDD 越接近 0 越好）</p>`;
   }
 
   // ────────── Tab 切換 ──────────

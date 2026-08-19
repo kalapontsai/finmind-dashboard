@@ -174,6 +174,29 @@ tr.highlight td { background: var(--highlight); font-weight: bold; }
   margin: 8px 0 14px;
 }
 
+.card.warn {
+  background: #fffaf0;
+  border-color: #f0c674;
+}
+.card.warn h2 { color: #8b4500; }
+.card.warn ul {
+  margin: 8px 0 0;
+  padding-left: 22px;
+}
+.card.warn li {
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #4a3000;
+}
+.card.warn code {
+  background: #f0e6d2;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
 .foot {
   text-align: center;
   color: var(--muted);

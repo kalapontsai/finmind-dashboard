@@ -90,3 +90,51 @@
 - ETF（4 碼 0050 / 6 碼含字母 00980A）需確認 FinMind 是否有資料
 - FinMind 對少數個股偶爾回傳壞資料（價格跳 100x），已自動視為 NaN 但可能影響該股貢獻
 - 共同期間若 < N 年，自動退回 Dynamic / Full（response 有 `forecast.basis` 標記）
+
+## 2026-08-20 — 交易成本預設值 + Flask 雙 process 修復
+
+### Changed
+
+- **交易成本欄位預設值**
+  - `templates/index.html`:買入手續費 default `0` → `0.142`,賣出證交稅 default `0` → `0.3`,滑價 default `0` → `0.1`
+  - 對應台股實際值(券商手續費上限 0.1425%、政府證交稅 0.3%、滑價 user 常用 0.1%)
+  - 注意:HTML 顯示是 % 單位,JS submit 時 ÷100 轉小數傳後端,既有邏輯不變
+
+### Verified
+
+- ✅ `/api/health` 全綠(token / pandas / reportlab / profile_csvs)
+- ✅ analyze → export PDF 端對端測試:liyu_stock.csv 31 檔 → 848KB JSON → 15.6KB PDF
+- ✅ Flask process 數從 2 個(32377 + 36435 zombie)清成 1 個(63503)
+
+### Known Notes
+
+- Flask 是 `Debug mode: off`,template 改完**不會 auto-reload**,改 HTML 後要重啟 Flask(本來設計就這樣,但要記得)
+- 之前 Flask 雙 process 跑(PID 32377 + 36435),其中 36435 沒 LISTEN 任何 port(zombie),可能是 user 重啟 Flask 時沒殺乾淨。**重啟 Flask 前要 pkill -f "python3 app.py" 清乾淨**
+
+## 2026-08-20 — PDF export IndexError 修復 + traceback logging + favicon route
+
+### Fixed
+
+- **PDF export `IndexError: list index out of range`** (`lib/exporter.py`):
+  - 觸發條件:`forecast.scenarios` 為空或 < 4 row 時(例如 Base 在 row 3,但 scenarios 只有 3 個 row)
+  - 修法:`if len(scenarios) >= 4` 才設 `BACKGROUND (0, 3)` 高亮 Base row,避免 rowpositions[sr] index overflow
+  - 觸發場景:stale lastResult 或部分完成的 analyze 結果
+
+- **Flask exception traceback logging** (`app.py` `/api/export` route):
+  - 原本 except 只 return jsonify(error=...),沒 log traceback,debug 看不到完整錯誤
+  - 加上 `app.logger.error('...%s\n%s', e, traceback.format_exc())`,寫進 `/tmp/flask.log`
+
+### Added
+
+- **`/favicon.ico` route**:回 1×1 透明 PNG,避免 console noise (`app.py`)
+
+### Verified
+
+- ✅ 空 scenarios 跑 PDF:HTTP 200(4.9KB,「（無 forecast 結果）」placeholder)
+- ✅ 5 scenarios 完整 PDF:HTTP 200(15.6KB,Base row 仍高亮)
+- ✅ `app.logger.error` 寫進 `/tmp/flask.log`(有真實 traceback,可 debug)
+
+
+### Known Issue(待修)
+
+- **前端 stale error 訊息**:使用者回報 PDF 失敗訊息出現在網頁(console 顯示 500),但實際 PDF 檔案已成功產生(15.6KB)。`/api/export` 後端 OK,問題在前端 `exportResult()` 拿到 response 後處理邏輯。**本次先 push 此版,issue 留後續修**(可能是 browser cache stale lastResult 或前端 render 邏輯)

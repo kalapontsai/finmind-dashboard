@@ -2,52 +2,73 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<title>Portfolio Forecast Report — {{ profile_name or 'untitled' }}</title>
+<title>投資組合歷史回測 + 未來 N 年情境報告 — {{ profile_name or 'untitled' }}</title>
 <style>
   body { font-family: Arial, "Microsoft JhengHei", "PingFang TC", sans-serif;
          background: #f5f7fa; color: #202b3c; margin: 0; padding: 0; }
   .wrap { max-width: 1180px; margin: 24px auto; padding: 0 18px; }
   .card { background: #fff; border: 1px solid #ddd; border-radius: 12px;
           padding: 20px; margin: 16px 0; }
-  h1 { color: #17365d; margin: 0 0 6px; }
+  h1 { color: #17365d; margin: 0 0 6px; font-size: 22px; }
   h2 { color: #17365d; border-bottom: 1px solid #e3e8ef; padding-bottom: 8px;
-       margin-top: 24px; }
+       margin-top: 24px; font-size: 17px; }
+  h3 { color: #17365d; margin-top: 18px; font-size: 14px; }
   .meta { color: #5a6a7e; font-size: 13px; margin-bottom: 8px; }
   table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-  th, td { border: 1px solid #ddd; padding: 8px; text-align: right; }
+  th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: right; font-size: 13px; }
   th, td:first-child { text-align: left; }
-  th { background: #eef3f8; }
+  th { background: #eef3f8; font-weight: bold; color: #17365d; }
   tr.highlight td { background: #fff7e6; font-weight: bold; }
-  .kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-  .kpi > div { background: #f1f5f9; padding: 14px; border-radius: 8px; }
-  .kpi small { color: #5a6a7e; font-size: 11px; }
-  .kpi b { display: block; font-size: 22px; margin-top: 5px; color: #17365d; }
+  .kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+  .kpi > div { background: #f1f5f9; padding: 12px 14px; border-radius: 8px; }
+  .kpi .kpi-name { color: #5a6a7e; font-size: 11px; display: block; font-weight: normal; }
+  .kpi .kpi-value { display: block; font-size: 22px; margin-top: 4px; color: #17365d; font-weight: bold; }
+  .kpi .kpi-tip { display: block; margin-top: 4px; font-size: 10px; color: #7a8a9e; line-height: 1.35; }
   .note { background: #fff7e6; border-left: 4px solid #d98b00;
-          padding: 12px; font-size: 13px; color: #6b4f00; }
+          padding: 12px 14px; font-size: 13px; color: #6b4f00; }
+  .card.warn { background: #fffaf0; border-color: #f0c674; }
+  .card.warn h2 { color: #8b4500; }
+  .card.warn ul { margin: 8px 0 0; padding-left: 22px; }
+  .card.warn li { margin: 6px 0; font-size: 13px; line-height: 1.6; color: #4a3000; }
+  .card.warn code { background: #f0e6d2; padding: 1px 5px; border-radius: 3px;
+                    font-family: Consolas, "Courier New", monospace; font-size: 12px; }
   .footer { text-align: center; color: #95a5b8; font-size: 12px; margin: 24px 0; }
-  @media print { body { background: #fff; } .card { border: none; box-shadow: none; } }
+  @media print { body { background: #fff; } .card { border: none; box-shadow: none; }
+                 .kpi { page-break-inside: avoid; } }
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <h1>股票組合歷史回測 + N 年情境報告</h1>
+  <h1>投資組合歷史回測 + 未來 N 年情境報告</h1>
   <div class="meta">
     用戶名單：<b>{{ profile_name or '（未指定）' }}</b>　·
-    N = <b>{{ analyze.forecast.n }} 年</b>　·
-    目前資產：<b>{{ "{:,}".format(analyze.forecast.pv|int) }}</b>　·
+    推估年數 N：<b>{{ analyze.forecast.n }} 年</b>　·
+    目前資產：<b>{{ "{:,}".format(analyze.forecast.pv|int) }}</b>{% if analyze.inputs.pv_cost_text %}（{{ analyze.inputs.pv_cost_text }}）{% endif %}　·
     生成時間：<b>{{ generated_at }}</b>
   </div>
 
   <div class="card">
     <h2>〇、組合起始市值</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">用「最新收盤價 × 股數」自動算出今天的組合值。</p>
     {% if analyze.market_value %}
     <div class="kpi" style="grid-template-columns: repeat(3, 1fr);">
-      <div><small>估值日</small><b>{{ analyze.market_value.as_of }}</b></div>
-      <div><small>組合市值</small><b>{{ "{:,}".format(analyze.market_value.total) }}</b></div>
-      <div><small>來源</small><b style="font-size:13px">{{ analyze.inputs.pv_source or '—' }}</b></div>
+      <div>
+        <span class="kpi-name">估值日</span>
+        <b class="kpi-value">{{ analyze.market_value.as_of }}</b>
+      </div>
+      <div>
+        <span class="kpi-name">組合市值</span>
+        <b class="kpi-value">{{ "{:,}".format(analyze.market_value.total) }}</b>
+        <span class="kpi-tip">最後收盤價 × 持有股數。</span>
+      </div>
+      <div>
+        <span class="kpi-name">市值來源</span>
+        <b class="kpi-value" style="font-size:14px">{{ analyze.inputs.pv_source or '—' }}</b>
+        <span class="kpi-tip">「market_value」= 自動用市值；「user_input」= 手動指定。</span>
+      </div>
     </div>
-    <table style="margin-top:12px">
+    <table style="margin-top:14px">
       <thead><tr><th>股票</th><th>股數</th><th>收盤價</th><th>市值</th><th>權重</th></tr></thead>
       <tbody>
       {% for s in analyze.market_value.per_stock|sort(attribute='value', reverse=true) %}
@@ -65,7 +86,8 @@
   </div>
 
   <div class="card">
-    <h2>〇.五、Ticker 驗證結果</h2>
+    <h2>〇.五、代號驗證結果（從 FinMind TaiwanStockInfo 比對）</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">自動把你寫的代號補 0 並對到正確的 stock_id。</p>
     {% if analyze.inputs.ticker_match %}
     <table>
       <thead><tr>
@@ -79,14 +101,14 @@
           <td>{{ m.stock_name or '—' }}</td>
           <td>{{ m.type or '—' }}</td>
           <td>{{ m.matched_from | join(', ') }}</td>
-          <td>{% if m.stock_id in short_set %}⚠️ 歷史 < {{ analyze.forecast.n }} 年{% else %}✓{% endif %}</td>
+          <td>{% if m.stock_id in short_set %}⚠️ 歷史 &lt; {{ analyze.forecast.n }} 年（不適合長期推估）{% else %}✓ 歷史足夠{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     {% if analyze.inputs.invalid_tickers %}
-    <div class="err" style="display:block; margin-top:8px">
-      以下代號在 FinMind TaiwanStockInfo 查無資料：<br>
+    <div style="background:#fff5f5; border-left:4px solid #b42318; padding:10px; margin-top:8px; font-size:13px;">
+      <b>⚠️ 以下代號在 FinMind TaiwanStockInfo 查無資料（已略過）：</b><br>
       {% for x in analyze.inputs.invalid_tickers %}{{ x.user_input }}：{{ x.reason }}<br>{% endfor %}
     </div>
     {% endif %}
@@ -94,13 +116,14 @@
   </div>
 
   <div class="card">
-    <h2>一、個股歷史長度診斷</h2>
+    <h2>一、各標的歷史長度（最少 / 中位數 / 最多 觀測年數）</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">看每檔股票各自有多少年歷史資料 — 太短的會拉低 N 年推估的可信度。</p>
     {% set short_set = analyze.inputs.short_history or [] %}
     {% if analyze.history.per_stock %}
     <table>
       <thead><tr>
-        <th>股票</th><th>第一天</th><th>最後一天</th>
-        <th>資料點</th><th>歷史年數</th><th>首日收盤</th>
+        <th>股票</th><th>有資料第一天</th><th>最後一天</th>
+        <th>資料點數</th><th>歷史年數</th><th>首日收盤（還原除權息）</th>
       </tr></thead>
       <tbody>
       {% for t, info in (analyze.history.per_stock|dictsort) %}
@@ -119,42 +142,88 @@
   </div>
 
   <div class="card">
-    <h2>二、歷史回測三模式結果</h2>
-    {% for mode_key, mode_label in [('common','Common Period（共同期間）'), ('dynamic','Dynamic Entry（動態加入）'), ('full','Full Available History（可觀測歷史）')] %}
+    <h2>二、歷史真實績效：3 種回測模式比較</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">不同回測條件會得到不同答案 — 並列顯示才能看到答案的「完整範圍」。</p>
+    {% set mode_meta = [
+      ('common', '全體共同期間（最嚴格比較）',
+       '從「最晚掛牌的那檔股票」上市日開始算起，所有標的從同一起跑點公平競爭。'),
+      ('dynamic', '逐步加入模式（最貼近真實投資）',
+       '哪檔股票上市了就自動納入組合，還原資金隨時間逐步配置的真實情況。'),
+      ('full', '各標的完整歷史（單獨診斷）',
+       '每檔股票各自從上市第一天算到現在，用來檢視個股本身的歷史能力。'),
+    ] %}
+    {% for mode_key, mode_label, mode_tip in mode_meta %}
       {% if analyze[mode_key] %}
       <h3 style="color:#17365d; margin-top:18px;">▶ {{ mode_label }}</h3>
+      <p style="color:#5a6a7e; font-size:12px; margin:0 0 8px;">{{ mode_tip }}</p>
       {% set m = analyze[mode_key].metrics %}
       <div class="kpi">
-        <div><small>開始</small><b>{{ m.start }}</b></div>
-        <div><small>結束</small><b>{{ m.end }}</b></div>
-        <div><small>年數</small><b>{{ "%.2f"|format(m.years) }}</b></div>
-        <div><small>Total Return</small><b>{{ "%.2f"|format(m.total_return * 100) }}%</b></div>
-        <div><small>CAGR</small><b>{{ "%.2f"|format(m.cagr * 100) }}%</b></div>
-        <div><small>MDD</small><b>{{ "%.2f"|format(m.mdd * 100) }}%</b></div>
-        <div><small>Volatility</small><b>{{ "%.2f"|format(m.volatility * 100) }}%</b></div>
-        <div><small>Sharpe</small><b>{{ "%.3f"|format(m.sharpe) }}</b></div>
+        <div>
+          <span class="kpi-name">開始日期</span>
+          <b class="kpi-value">{{ m.start }}</b>
+        </div>
+        <div>
+          <span class="kpi-name">結束日期</span>
+          <b class="kpi-value">{{ m.end }}</b>
+        </div>
+        <div>
+          <span class="kpi-name">回測年數</span>
+          <b class="kpi-value">{{ "%.2f"|format(m.years) }}</b>
+          <span class="kpi-tip">歷史回測覆蓋的實際年數。</span>
+        </div>
+        <div>
+          <span class="kpi-name">累積總報酬率</span>
+          <b class="kpi-value">{{ "%.2f"|format(m.total_return * 100) }}%</b>
+          <span class="kpi-tip">整段期間的累積漲跌幅（未年化）。</span>
+        </div>
+        <div>
+          <span class="kpi-name">年化報酬率（年均複利）</span>
+          <b class="kpi-value">{{ "%.2f"|format(m.cagr * 100) }}%</b>
+          <span class="kpi-tip">把累積報酬攤提成「每年平均成長幾 %」。</span>
+        </div>
+        <div>
+          <span class="kpi-name">歷史最大跌幅（最大回檔）</span>
+          <b class="kpi-value">{{ "%.2f"|format(m.mdd * 100) }}%</b>
+          <span class="kpi-tip">從最高點跌到最低點的最慘虧損幅度。</span>
+        </div>
+        <div>
+          <span class="kpi-name">年化波動率（價格震盪幅度）</span>
+          <b class="kpi-value">{{ "%.2f"|format(m.volatility * 100) }}%</b>
+          <span class="kpi-tip">數值越高代表平常股價上沖下洗越劇烈。</span>
+        </div>
+        <div>
+          <span class="kpi-name">性價比（夏普值）</span>
+          <b class="kpi-value">{{ "%.3f"|format(m.sharpe) }}</b>
+          <span class="kpi-tip">評估承擔波動風險是否划算；&gt;1 代表承擔風險的回報很划算。</span>
+        </div>
       </div>
       {% endif %}
     {% endfor %}
   </div>
 
   <div class="card">
-    <h2>三、未來 N 年情境終值</h2>
+    <h2>三、未來 N 年情境推估（終值分布）</h2>
     <div class="note">
-      取 Portfolio NAV 的歷史 N-Year rolling CAGR 對應分位數（基於 <b>{{ analyze.forecast.basis or '—' }}</b> 模式），
-      以 PV × (1+r)^N 計算 N 年後終值。僅回答「歷史上相同持有期間曾經出現的結果分布」，
-      不構成未來保證或投資建議。
+      取「歷史滾動 N 年收益分布」的分位數（基於 <b>{{ analyze.forecast.basis or '—' }}</b> 模式），
+      算出 5 個情境的終值。FV = 目前資產 × (1+r)^N。<b>不模擬未來逐年路徑</b>。
     </div>
     {% if analyze.forecast.scenarios %}
     <table>
       <thead><tr>
-        <th>情境</th><th>分位數</th><th>歷史 N-Year CAGR</th>
-        <th>目前資產</th><th>N 年後</th><th>倍數</th>
+        <th>情境</th><th>分位數</th><th>歷史 N 年年化報酬率</th>
+        <th>目前資產</th><th>N 年後終值</th><th>資產增長倍數</th>
       </tr></thead>
       <tbody>
+        {% set scen_tip = {
+          'Bear': '遇上極端弱勢市場時的預估結果。',
+          'Conservative': '市場表現偏弱時的預估結果。',
+          'Base': '最符合歷史一般平均表現的中間值。',
+          'Optimistic': '市場處於順風多頭時的預估結果。',
+          'Bull': '遇上超強大多頭行情的預估結果。',
+        } %}
         {% for s in analyze.forecast.scenarios %}
         <tr {% if s.name == 'Base' %}class="highlight"{% endif %}>
-          <td>{{ s.scenario }}</td>
+          <td title="{{ scen_tip.get(s.name, '') }}">{{ s.scenario }}</td>
           <td>P{{ (s.percentile * 100)|int }}</td>
           <td>{{ "%.2f"|format(s.cagr * 100) }}%</td>
           <td>{{ "{:,}".format(analyze.forecast.pv|int) }}</td>
@@ -164,23 +233,53 @@
         {% endfor %}
       </tbody>
     </table>
-    <p class="meta">歷史 N-Year rolling 樣本數：<b>{{ analyze.forecast.rolling_count }}</b></p>
+    <p class="meta">歷史滾動 N 年樣本數：<b>{{ analyze.forecast.rolling_count }}</b></p>
     {% endif %}
   </div>
 
+  {% if analyze.benchmark %}
+  <div class="card">
+    <h2>四、Benchmark 對照組</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">拿一檔基準股票跟你的組合比較，看是贏還是輸。</p>
+    {% if analyze.benchmark.error %}
+    <p style="color:#b42318;">Benchmark 抓取失敗：{{ analyze.benchmark.error }}</p>
+    {% elif analyze.benchmark.metrics %}
+    {% set bm = analyze.benchmark %}
+    {% set port_m = analyze.dynamic.metrics %}
+    <table>
+      <thead><tr><th>指標</th><th>Benchmark {{ bm.ticker }}</th><th>組合（逐步加入）</th></tr></thead>
+      <tbody>
+        <tr><td>年化報酬率（年均複利）</td>
+          <td>{{ "%.2f"|format(bm.metrics.cagr * 100) }}%</td>
+          <td>{{ "%.2f"|format(port_m.cagr * 100) }}%</td></tr>
+        <tr><td>歷史最大跌幅（最大回檔）</td>
+          <td>{{ "%.2f"|format(bm.metrics.mdd * 100) }}%</td>
+          <td>{{ "%.2f"|format(port_m.mdd * 100) }}%</td></tr>
+        <tr><td>年化波動率（價格震盪幅度）</td>
+          <td>{{ "%.2f"|format(bm.metrics.volatility * 100) }}%</td>
+          <td>{{ "%.2f"|format(port_m.volatility * 100) }}%</td></tr>
+        <tr><td>性價比（夏普值）</td>
+          <td>{{ "%.3f"|format(bm.metrics.sharpe) }}</td>
+          <td>{{ "%.3f"|format(port_m.sharpe) }}</td></tr>
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="card warn">
-    <h2>四、研究限制提醒</h2>
+    <h2>五、研究限制提醒</h2>
     <ul>
-      <li><b>Survivorship Bias</b>：本名單是 2026 年仍存在的持股。若用來回測 2010-2020，這段期間下市的股票已被默默排除，會高估歷史報酬。</li>
-      <li><b>Look-Ahead Bias</b>：本工具使用的權重 / 持股是「現在的決定」，不模擬「當時不知道的未來」。</li>
-      <li><b>股利/除權息</b>：FinMind TaiwanStockPrice 的 <code>close</code> 為「調整後收盤價」（adj_close），已含除權息還原。CAGR 含股利再投資效果。</li>
+      <li><b>倖存者偏差提示</b>：本名單是 2026 年仍存在的持股。若用來回測 2010-2020，這段期間下市的股票已被默默排除，會高估歷史報酬。</li>
+      <li><b>未來資訊偏差提示</b>：本工具使用的權重 / 持股是「現在的決定」，不模擬「當時不知道的未來」。</li>
+      <li><b>還原除權息收盤價</b>：FinMind TaiwanStockPrice 的 <code>close</code> 為「已包含配息、配股再投入效益的真實價格」，CAGR 含股利再投資效果。</li>
       <li><b>交易成本</b>：本版未計手續費 / 證交稅 / 滑價。實際買入需扣 0.1425% 手續費、賣出再扣 0.3% 證交稅。</li>
-      <li><b>Forecast 語意</b>：P10/P50/P90 是「歷史上相同 N 年持有期間的結果分布」，<b>不是未來保證</b>。</li>
+      <li><b>情境推估語意</b>：P10/P50/P90 是「歷史上相同 N 年持有期間的結果分布」，<b>不是未來保證</b>。</li>
     </ul>
   </div>
 
   <div class="footer">
-    Generated by stock-portfolio-forecast · 本報表為歷史回測情境參考，不構成投資建議
+    Generated by stock-portfolio-forecast · 本報表為歷史回測情境參考，<b>不構成投資建議</b>
   </div>
 </div>
 </body>

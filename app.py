@@ -11,6 +11,7 @@ app.py — Flask 入口
 """
 from __future__ import annotations
 
+import io
 import json
 import sys
 import uuid
@@ -21,6 +22,7 @@ import pandas as pd
 from flask import (
     Flask, jsonify, render_template, request, send_from_directory, url_for,
 )
+from werkzeug.utils import secure_filename
 
 # 確保根目錄在 sys.path（讓 from lib.xxx 有效）
 ROOT_DIR = Path(__file__).resolve().parent
@@ -36,6 +38,7 @@ from lib.csv_loader import CSVLintError, list_profile_csvs, load_portfolio_csv  
 from lib.exporter import render_html_report, render_pdf_report  # noqa: E402
 from lib.finmind import FinMindClient, FinMindError, load_finmind_token  # noqa: E402
 from lib.forecast import ForecastError, build_forecast  # noqa: E402
+from lib.i18n import TERMS  # noqa: E402
 from lib.portfolio import (  # noqa: E402
     BacktestError, build_benchmark, build_portfolio, compute_market_value,
     per_stock_history, prices_to_pivot,
@@ -53,11 +56,25 @@ def create_app() -> Flask:
     # ────────────── 頁面 ──────────────
     @app.route('/')
     def index():
-        return render_template('index.html')
+        return render_template(
+            'index.html',
+            terms_json=json.dumps(TERMS, ensure_ascii=False),
+        )
 
     @app.route('/data/reports/<path:filename>')
     def serve_report(filename):
         return send_from_directory(str(REPORTS_DIR), filename, as_attachment=False)
+
+    @app.route('/favicon.ico')
+    def favicon():
+        # 避免 404 noise:用 1×1 透明 PNG(不是 ICO 但能跨瀏覽器避免報錯)
+        from flask import Response
+        return Response(
+            b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+            b'\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xff'
+            b'\xff?\x00\x05\xfe\x02\xfe\xdc\xcc\x59\xe7\x00\x00\x00\x00IEND\xaeB`\x82',
+            mimetype='image/png',
+        )
 
     # ────────────── 健康檢查 ──────────────
     @app.get('/api/health')
@@ -107,6 +124,35 @@ def create_app() -> Flask:
             'holdings': [{'ticker': h.ticker, 'shares': h.shares} for h in holdings],
         })
 
+    # ────────────── 上傳名單 CSV ──────────────
+    @app.post('/api/upload_profile')
+    def upload_profile():
+        """瀏覽器上傳 CSV → 存到 user_profile/ → 驗格式。
+        用 werkzeug.utils.secure_filename 防 path traversal；
+        用既有 load_portfolio_csv 做內容驗證（壞檔不落地）。"""
+        if 'file' not in request.files:
+            return jsonify({'error': '沒有收到檔案'}), 400
+        f = request.files['file']
+        if not f.filename:
+            return jsonify({'error': '檔名是空的'}), 400
+        safe = secure_filename(f.filename)
+        if not safe or not safe.lower().endswith('.csv'):
+            return jsonify({'error': '只接受 .csv 檔案'}), 400
+        name = safe[:-4]  # strip .csv
+        if not name:
+            return jsonify({'error': '檔名不可為空'}), 400
+        try:
+            content = f.read().decode('utf-8-sig')
+        except UnicodeDecodeError as e:
+            return jsonify({'error': f'編碼錯誤（需 UTF-8）：{e}'}), 400
+        try:
+            load_portfolio_csv(io.StringIO(content))
+        except CSVLintError as e:
+            return jsonify({'error': f'CSV 格式錯誤：{e}'}), 400
+        out = USER_PROFILE_DIR / f'{name}.csv'
+        out.write_text(content, encoding='utf-8-sig')
+        return jsonify({'name': name, 'file': safe, 'size': len(content)}), 200
+
     # ────────────── 主分析 ──────────────
     @app.post('/api/analyze')
     def analyze():
@@ -141,6 +187,8 @@ def create_app() -> Flask:
             try:
                 render_pdf_report(result, out, profile_name=profile_name)
             except Exception as e:  # noqa: BLE001
+                import traceback
+                app.logger.error('PDF 產生失敗：%s\n%s', e, traceback.format_exc())
                 return jsonify({'error': f'PDF 產生失敗：{e}'}), 500
         else:
             fname = f'portfolio_forecast_{ts}_{uid}.html'
@@ -151,6 +199,8 @@ def create_app() -> Flask:
                     encoding='utf-8',
                 )
             except Exception as e:  # noqa: BLE001
+                import traceback
+                app.logger.error('HTML 產生失敗：%s\n%s', e, traceback.format_exc())
                 return jsonify({'error': f'HTML 產生失敗：{e}'}), 500
 
         return jsonify({

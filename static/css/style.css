@@ -71,6 +71,32 @@ input:focus, select:focus {
 
 .hint { color: var(--muted); font-size: 12px; margin-top: 4px; display: block; }
 
+/* 用戶名單（CSV）那一列：hint + 上傳按鈕並排 */
+.profile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+.profile-row .hint { margin-top: 0; flex: 1; min-width: 0; }
+
+.btn-mini {
+  padding: 5px 12px;
+  background: var(--accent-2);
+  color: #fff;
+  border: 0;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: normal;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.btn-mini:hover:not(:disabled) { background: #2d7ad9; }
+.btn-mini:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .actions {
   display: flex;
   gap: 10px;
@@ -143,8 +169,30 @@ button#btnExportHtml:hover:not(:disabled) { background: #3d4a5c; }
   padding: 14px;
   border-radius: 8px;
 }
-.kpi small { color: var(--muted); font-size: 11px; }
-.kpi b { display: block; font-size: 22px; margin-top: 5px; color: var(--accent); }
+.kpi .kpi-name {
+  color: var(--muted);
+  font-size: 11px;
+  display: block;
+  font-weight: normal;
+}
+.kpi .kpi-value {
+  display: block;
+  font-size: 22px;
+  margin-top: 5px;
+  color: var(--accent);
+}
+.kpi .kpi-tip {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #7a8a9e;
+  line-height: 1.4;
+}
+
+.tab { text-align: center; padding: 8px 12px; }
+.tab b { display: block; font-size: 13px; }
+.tab small { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.tab.active small { color: var(--accent-2); }
 
 .chart { height: 360px; position: relative; margin-top: 8px; }
 .chart.small { height: 280px; }

@@ -75,6 +75,54 @@
     }
   }
 
+  // ────────── 上傳 CSV 名單 ──────────
+  async function uploadProfile(file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const btn = $('btnUploadProfile');
+    btn.disabled = true;
+    btn.textContent = '⏳ 上傳中…';
+    try {
+      const r = await fetch('/api/upload_profile', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (!r.ok) {
+        showErr('上傳失敗：' + (d.error || 'unknown'));
+        return;
+      }
+      clearErr();
+      await loadProfiles();
+      const sel = $('profileSel');
+      sel.value = d.name;
+      if (sel.value === d.name) {
+        // 手動觸發 change 讓 preview 跑一次
+        sel.dispatchEvent(new Event('change'));
+      }
+    } catch (e) {
+      showErr('上傳失敗：' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📁 上傳 CSV';
+    }
+  }
+
+  function bindUpload() {
+    const btn = $('btnUploadProfile');
+    const input = $('fileUploadProfile');
+    btn.addEventListener('click', () => input.click());
+    input.addEventListener('change', () => {
+      if (input.files.length === 0) return;
+      const f = input.files[0];
+      if (!f.name.toLowerCase().endsWith('.csv')) {
+        showErr('只接受 .csv 檔案');
+        input.value = '';
+        return;
+      }
+      uploadProfile(f);
+      // 清空 value 才能重複上傳同檔
+      input.value = '';
+    });
+  }
+
   // ────────── 錯誤顯示 ──────────
   function showErr(msg) {
     const e = $('err');
@@ -319,8 +367,6 @@
   function renderForecast(d) {
     const f = d.forecast;
     $('fcBasis').textContent = f.basis || 'common';
-    const f = d.forecast;
-    $('fcBasis').textContent = f.basis || 'common';
     const tb = $('fcTable').querySelector('tbody');
     tb.innerHTML = (f.scenarios || [])
       .map((s) => {
@@ -336,7 +382,9 @@
       })
       .join('');
     $('rCount').textContent = f.rolling_count;
-    $('forecastNote').textContent = `取 Portfolio NAV（${f.basis || 'common'} 模式）所有 N-Year rolling CAGR 的分位數 → FV = PV × (1+r)^N。不模擬逐年路徑。` + (d.inputs.pv_cost_text || '');
+    const basisMap = { common: '全體共同期間', dynamic: '逐步加入模式', full: '各標的完整歷史' };
+    const basisZh = basisMap[f.basis] || f.basis || '—';
+    $('forecastNote').innerHTML = `取「<b>${basisZh}</b>」模式下所有 N 年持有期間的歷史收益分布，依分位數算出 5 個情境的終值。FV = 目前資產 × (1+r)^N。<b>不模擬未來逐年路徑</b>。` + (d.inputs.pv_cost_text ? ' ' + d.inputs.pv_cost_text : '');
 
     const rs = f.rolling || [];
     if (rollChart) rollChart.destroy();
@@ -452,6 +500,7 @@
     $('btnExportPdf').addEventListener('click', () => exportResult('pdf'));
     $('btnExportHtml').addEventListener('click', () => exportResult('html'));
     bindTabs();
+    bindUpload();
     loadProfiles();
   });
 })();

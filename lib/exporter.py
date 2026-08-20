@@ -272,8 +272,9 @@ def render_pdf_report(analyze: dict, out_path: Path, profile_name: str = '') -> 
     if not fc:
         story.append(Paragraph('（無 forecast 結果）', body))
     else:
+        scenarios = fc.get('scenarios', [])
         rows = [['情境', '分位數', '歷史 N-Year CAGR', '目前資產', 'N 年後', '倍數']]
-        for s in fc.get('scenarios', []):
+        for s in scenarios:
             rows.append([
                 s.get('scenario', '—'),
                 f"P{int(s.get('percentile', 0) * 100)}",
@@ -283,14 +284,17 @@ def render_pdf_report(analyze: dict, out_path: Path, profile_name: str = '') -> 
                 f"{s.get('multiple', 0):.2f}x",
             ])
         t = Table(rows, colWidths=[40 * mm, 20 * mm, 30 * mm, 28 * mm, 32 * mm, 16 * mm])
-        t.setStyle(TableStyle([
+        styles = [
             ('FONTNAME', (0, 0), (-1, -1), cn_font),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#eef3f8')),
             ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#cccccc')),
             ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
-            ('BACKGROUND', (0, 3), (-1, 3), colors.HexColor('#fff7e6')),
-        ]))
+        ]
+        # 只在 scenarios >= 4 row(Base 在 row 3)時才高亮(避免 index out of range)
+        if len(scenarios) >= 4:
+            styles.append(('BACKGROUND', (0, 3), (-1, 3), colors.HexColor('#fff7e6')))
+        t.setStyle(TableStyle(styles))
         story.append(t)
         story.append(Spacer(1, 4 * mm))
         story.append(Paragraph(

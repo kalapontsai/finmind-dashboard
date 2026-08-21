@@ -64,15 +64,21 @@ def test_build_forecast_full():
     assert out['n'] == 10
     assert out['pv'] == 1_000_000
     assert out['rolling_count'] > 0
+    assert out['r_count'] > 0
+    assert out['r_count'] == out['rolling_count']  # 兩個名子是同一個值（compatibility alias）
     assert len(out['scenarios']) == 5
-    assert all(s['future_value'] > 0 for s in out['scenarios'])
+    assert all(s['fv'] > 0 for s in out['scenarios'])
     # Base (P50) 倍數應該 >= 1，若 CAGR > 0
-    base = next(s for s in out['scenarios'] if s['name'] == 'Base')
+    base = next(s for s in out['scenarios'] if s['label'] == 'Base')
     if base['cagr'] > 0:
-        assert base['multiple'] > 1
+        assert base['multiplier'] > 1
     # FV 應該隨 CAGR 遞增
     cagrs = [s['cagr'] for s in out['scenarios']]
     assert cagrs == sorted(cagrs)
+    # 驗證 quantile 欄位是數字
+    assert all(isinstance(s['quantile'], (int, float)) for s in out['scenarios'])
+    # 驗證 label 是字串
+    assert all(isinstance(s['label'], str) for s in out['scenarios'])
 
 
 def test_build_forecast_invalid_n():

@@ -94,16 +94,17 @@ def build_forecast(nav: pd.Series, n: int, pv: float) -> dict:
     rolling = rolling_n_year_cagr(nav, n)
     pct = scenario_percentiles(rolling)
     scenarios = []
-    for name, q, full_name in SCENARIOS:
+    for name, q, _full_name in SCENARIOS:
         r = pct[name]
         fv = future_value(pv, r, n)
         scenarios.append({
-            'scenario': full_name,
-            'name': name,
-            'percentile': q,
+            # 'scenario' 保留作 compatibility，但主名稱以 'label' 為準
+            'scenario': f'{name} (P{int(q*100)})',
+            'label': name,
+            'quantile': q,
             'cagr': r,
-            'future_value': fv,
-            'multiple': fv / pv if pv > 0 else float('nan'),
+            'fv': fv,
+            'multiplier': fv / pv if pv > 0 else float('nan'),
         })
     rolling_list = [
         {
@@ -117,7 +118,8 @@ def build_forecast(nav: pd.Series, n: int, pv: float) -> dict:
     return {
         'n': n,
         'pv': pv,
-        'rolling_count': len(rolling),
+        'rolling_count': len(rolling),  # 保留舊名作 compatibility
+        'r_count': len(rolling),         # 主名稱（驗收標準 #5）
         'percentiles': pct,
         'scenarios': scenarios,
         'rolling': rolling_list,

@@ -129,8 +129,8 @@
       {% for t, info in (analyze.history.per_stock|dictsort) %}
         <tr {% if t in short_set %}style="color:#b42318"{% endif %}>
           <td>{{ t }}{% if t in short_set %} ⚠️{% endif %}</td>
-          <td>{{ info.first_date or '—' }}</td>
-          <td>{{ info.last_date or '—' }}</td>
+          <td>{{ info.start or '—' }}</td>
+          <td>{{ info.end or '—' }}</td>
           <td>{{ info.rows }}</td>
           <td>{{ "%.2f"|format(info.years) }}</td>
           <td>{{ "%.2f"|format(info.first_close) if info.first_close is not none else '—' }}</td>
@@ -222,13 +222,13 @@
           'Bull': '遇上超強大多頭行情的預估結果。',
         } %}
         {% for s in analyze.forecast.scenarios %}
-        <tr {% if s.name == 'Base' %}class="highlight"{% endif %}>
-          <td title="{{ scen_tip.get(s.name, '') }}">{{ s.scenario }}</td>
-          <td>P{{ (s.percentile * 100)|int }}</td>
+        <tr {% if s.label == 'Base' %}class="highlight"{% endif %}>
+          <td title="{{ scen_tip.get(s.label, '') }}">{{ s.label }}</td>
+          <td>P{{ (s.quantile * 100)|int }}</td>
           <td>{{ "%.2f"|format(s.cagr * 100) }}%</td>
           <td>{{ "{:,}".format(analyze.forecast.pv|int) }}</td>
-          <td><b>{{ "{:,}".format(s.future_value|int) }}</b></td>
-          <td>{{ "%.2f"|format(s.multiple) }}x</td>
+          <td><b>{{ "{:,}".format(s.fv|int) }}</b></td>
+          <td>{{ "%.2f"|format(s.multiplier) }}x</td>
         </tr>
         {% endfor %}
       </tbody>

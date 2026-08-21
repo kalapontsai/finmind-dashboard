@@ -81,7 +81,12 @@ NAV_t=NAV_{t-1}(1+R_{p,t})
 
 每一支股票從其第一個有效價格開始加入組合。
 
-某一天只有部分股票有報酬資料時，只對當天可觀測股票重新正規化權重。
+某一天只有部分股票有報酬資料時，只對當天可觀測股票重新正規化權重，**並設上限 cap = 1.5 / N_total**（避免 1 檔被放大為 100% weight 造成 early period MDD 被蓋大）。
+
+**v2 改動 (2026-08-21)**：加上 cap 以避免早期股票被放大。N=9 股票時:
+- 1 stock active: 上限 16.7% (原本 100%)
+- 2 stocks active: 上限 16.7% each (total 33.3%)
+- 4+ stocks active: normal 運作
 
 用途：
 
@@ -94,7 +99,11 @@ NAV_t=NAV_{t-1}(1+R_{p,t})
 
 ### 3.3 Full Available History
 
-利用每支股票可取得的歷史資料；當某股票尚無有效資料時，不使用該股票的報酬，並將當日有效股票權重重新正規化。
+每支股票從自己最早資料日開始計入。**Fixed weights + fillna(0)** — 未上市股票視為 0% return（不算進 portfolio），不重新正規化權重。
+
+**v2 改動 (2026-08-21)**：原本 = dynamic (重新正規化) → 改為 fixed weights + fillna(0)。差別:
+- dynamic: dropna + renormalize (cap 1.5/N)
+- full: fillna(0) + fixed weights (從第一天就以原重計入)
 
 用途：
 
@@ -102,6 +111,8 @@ NAV_t=NAV_{t-1}(1+R_{p,t})
 - 觀察整個股票池在「各自可觀測期間」下的表現
 
 不應直接把這個結果解讀成嚴格的 Point-in-Time 歷史投資策略。
+
+**注意**：v2 之後 full 的 MDD 比 dynamic 低（因為不重新正規化）。兩者差異會隨 N 股票上市後越來越小。
 
 ---
 

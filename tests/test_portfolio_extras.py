@@ -63,10 +63,12 @@ def test_per_stock_history():
     assert set(h.keys()) == {'2330', '2317', '0050'}
     for t, info in h.items():
         assert info['rows'] == 5
-        assert info['first_date'] == '2024-01-01'
-        assert info['last_date'] == '2024-01-05'
+        assert info['start'] == '2024-01-01'
+        assert info['end'] == '2024-01-05'
         assert info['years'] > 0
         assert info['first_close'] > 0
+        assert info['last_close'] is not None
+        assert info['last_close'] > 0
 
 
 def test_per_stock_history_empty_column():
@@ -76,3 +78,6 @@ def test_per_stock_history_empty_column():
     assert h['9999']['rows'] == 0
     assert h['9999']['years'] == 0
     assert h['9999']['first_close'] is None
+    assert h['9999']['last_close'] is None
+    assert h['9999']['start'] is None
+    assert h['9999']['end'] is None

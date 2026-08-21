@@ -280,8 +280,8 @@
         const warn = short.has(t) ? ' <b style="color:#b42318">⚠️</b>' : '';
         return `<tr>
           <td>${t}${warn}</td>
-          <td>${info.first_date || '—'}</td>
-          <td>${info.last_date || '—'}</td>
+          <td>${info.start || '—'}</td>
+          <td>${info.end || '—'}</td>
           <td>${info.rows || 0}</td>
           <td>${(info.years || 0).toFixed(2)}</td>
           <td>${info.first_close != null ? fmtFloat(info.first_close, 2) : '—'}</td>
@@ -370,18 +370,18 @@
     const tb = $('fcTable').querySelector('tbody');
     tb.innerHTML = (f.scenarios || [])
       .map((s) => {
-        const isBase = s.name === 'Base';
+        const isBase = s.label === 'Base';
         return `<tr class="${isBase ? 'highlight' : ''}">
-          <td>${s.scenario}</td>
-          <td>P${(s.percentile * 100) | 0}</td>
+          <td>${s.label}</td>
+          <td>P${(s.quantile * 100) | 0}</td>
           <td>${fmtPct(s.cagr)}</td>
           <td>${fmtMoney(f.pv)}</td>
-          <td><b>${fmtMoney(s.future_value)}</b></td>
-          <td>${fmtFloat(s.multiple, 2)}x</td>
+          <td><b>${fmtMoney(s.fv)}</b></td>
+          <td>${fmtFloat(s.multiplier, 2)}x</td>
         </tr>`;
       })
       .join('');
-    $('rCount').textContent = f.rolling_count;
+    $('rCount').textContent = f.r_count;
     const basisMap = { common: '全體共同期間', dynamic: '逐步加入模式', full: '各標的完整歷史' };
     const basisZh = basisMap[f.basis] || f.basis || '—';
     $('forecastNote').innerHTML = `取「<b>${basisZh}</b>」模式下所有 N 年持有期間的歷史收益分布，依分位數算出 5 個情境的終值。FV = 目前資產 × (1+r)^N。<b>不模擬未來逐年路徑</b>。` + (d.inputs.pv_cost_text ? ' ' + d.inputs.pv_cost_text : '');

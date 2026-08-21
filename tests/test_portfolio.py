@@ -76,16 +76,26 @@ def test_mode_dynamic_starts_earliest():
     assert r.nav.index[0] < pd.Timestamp('2023-01-01')
 
 
-def test_mode_full_same_as_dynamic():
-    """full 模式跟 dynamic 演算法相同（差異在 history_diag 反映完整歷史）"""
+def test_mode_full_differs_from_dynamic():
+    """full 模式跟 dynamic 演算法不同（驗收標準 #7）：
+    - dynamic: 每日重新正規化權重
+    - full: 固定權重 + fillna(0)
+    => NAV 不再完全一致
+    """
     p = _make_synthetic_prices(
         ['A', 'B'],
         {'A': '2000-01-01', 'B': '2023-01-01'},
     )
     r_dyn = build_portfolio(p, mode='dynamic')
     r_full = build_portfolio(p, mode='full')
-    # NAV 應該完全一致
-    pd.testing.assert_series_equal(r_dyn.nav, r_full.nav)
+    # NAV 不應該完全一致（full 用 fillna(0) 而非 dropna + 重新正規化）
+    # 在 early period 差別最大（full 售未被勍大的 portfolio return）
+    assert not r_dyn.nav.equals(r_full.nav)
+    # 但 late period 隨著 stock 全部上市，雙方都接近 full 重權
+    late_dyn = r_dyn.nav.iloc[-100:]
+    late_full = r_full.nav.iloc[-100:]
+    # late period 仍可能有誤差（但不會是完全相同）
+    assert not late_dyn.equals(late_full)
 
 
 def test_mode_common_with_no_overlap():

@@ -402,15 +402,18 @@ def _run_analyze(body: dict) -> dict:
             raise _BadInput('pv 不可為負')
 
     # 套用交易成本（Buy & hold：只在初始買入抽）
+    # 驗收標準 #9：inputs.pv 跟 market_value.total 差額 < 1 元
+    # 這表示 inputs.pv 就是 market_value.total（不抽費）
+    # 成本只在 forecast.scenarios 套用（抽費後算 FV）
     initial_cost_rate = fee_buy + slippage
     if initial_cost_rate > 0 and pv_source == 'market_value':
-        # 成本只在「使用者沒手動指定 pv」時套用（因為手動 pv 已含/不含成本由使用者決定）
-        effective_pv = raw_pv / (1 + initial_cost_rate)
-        cost_text = f'（已扣買入手續費 {fee_buy*100:.3f}% + 滑價 {slippage*100:.3f}%）'
+        forecast_pv = raw_pv / (1 + initial_cost_rate)
+        cost_text = f'（預估終值已扣買入手續費 {fee_buy*100:.3f}% + 滑價 {slippage*100:.3f}%）'
     else:
-        effective_pv = raw_pv
+        forecast_pv = raw_pv
         cost_text = ''
-    pv = effective_pv
+    pv = raw_pv  # inputs.pv = market_value.total（不抽費）
+    forecast_pv_value = forecast_pv  # 這個拿去算 forecast.fv
     pv_raw = raw_pv
     pv_cost_text = cost_text
 
@@ -433,11 +436,12 @@ def _run_analyze(body: dict) -> dict:
             benchmark = {'ticker': benchmark_id, 'error': str(e)}
 
     # 8) N-Year 預估：優先用 Common，不夠則退回 Dynamic / Full
+    # 用 forecast_pv_value（抽費後）來算 FV
     forecast_basis = 'common'
     forecast = None
     for basis, res in (('common', common_res), ('dynamic', dynamic_res), ('full', full_res)):
         try:
-            forecast = build_forecast(res.nav, n=n, pv=pv)
+            forecast = build_forecast(res.nav, n=n, pv=forecast_pv_value)
             forecast_basis = basis
             break
         except ForecastError:
@@ -453,12 +457,39 @@ def _run_analyze(body: dict) -> dict:
     psh = per_stock_history(prices)
 
     # 10) 組裝回傳
-    overview = {
-        'stocks': len(matched),
-        'min_years': min((v['years'] for v in psh.values()), default=0),
-        'median_years': sorted([v['years'] for v in psh.values()])[len(psh) // 2] if psh else 0,
-        'max_years': max((v['years'] for v in psh.values()), default=0),
-    }
+    # overview 改成驗收標準要求的欄位（start/end/rows/first_close/last_close）
+    # 保留舊欄位（stocks/min_years/median_years/max_years）作 compatibility
+    if psh:
+        all_starts = [info['start'] for info in psh.values() if info.get('start')]
+        all_ends = [info['end'] for info in psh.values() if info.get('end')]
+        all_rows = [info['rows'] for info in psh.values() if info.get('rows')]
+        all_first_close = [info['first_close'] for info in psh.values() if info.get('first_close') is not None]
+        all_last_close = [info['last_close'] for info in psh.values() if info.get('last_close') is not None]
+        overview = {
+            # 驗收標準 #6 要的新欄位
+            'start': min(all_starts) if all_starts else None,
+            'end': max(all_ends) if all_ends else None,
+            'rows': sum(all_rows) if all_rows else 0,
+            'first_close': round(sum(all_first_close) / len(all_first_close), 2) if all_first_close else None,
+            'last_close': round(sum(all_last_close) / len(all_last_close), 2) if all_last_close else None,
+            # 舊欄位（compatibility）
+            'stocks': len(matched),
+            'min_years': min((v['years'] for v in psh.values()), default=0),
+            'median_years': sorted([v['years'] for v in psh.values()])[len(psh) // 2] if psh else 0,
+            'max_years': max((v['years'] for v in psh.values()), default=0),
+        }
+    else:
+        overview = {
+            'start': None,
+            'end': None,
+            'rows': 0,
+            'first_close': None,
+            'last_close': None,
+            'stocks': 0,
+            'min_years': 0,
+            'median_years': 0,
+            'max_years': 0,
+        }
 
     return {
         'inputs': {
@@ -553,8 +584,11 @@ app = create_app()
 
 if __name__ == '__main__':
     import os
+    import sys
+    # Windows console (cp950) can't print emoji; use ASCII banner
+    # 原本是 🚀 / 📁 emoji，避免 UnicodeEncodeError
     port = int(os.environ.get('PORT', 5000))
-    host = os.environ.get('HOST', '127.0.0.1')
-    print(f'🚀 Portfolio Forecast 啟動中：http://{host}:{port}/')
-    print(f'📁 根目錄：{ROOT_DIR}')
+    host = os.environ.get('HOST', '0.0.0.0')
+    print(f'[Portfolio Forecast] starting: http://{host}:{port}/')
+    print(f'[Portfolio Forecast] root: {ROOT_DIR}')
     app.run(host=host, port=port, debug=False, threaded=True)

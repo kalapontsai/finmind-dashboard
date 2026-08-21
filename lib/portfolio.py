@@ -121,10 +121,23 @@ def _mode_common(p: pd.DataFrame, w: pd.Series) -> tuple[pd.Series, pd.Series]:
 
 
 def _mode_dynamic(p: pd.DataFrame, w: pd.Series) -> tuple[pd.Series, pd.Series]:
-    """動態加入：每日只用當天有資料的股票，權重重新正規化"""
+    """動態加入：每日只用當天有資料的股票，權重重新正規化
+
+    加權重上限避免早期股票被放大（驗收標準 #8a）：
+    - 原本: 1 個 stock active 時被正規化為 100% weight → early period MDD 被盢大
+    - 修法: cap_per_stock = 1.5 / n_total（最多放大 1.5 倍）→ 早期股票不會獨大
+      → 1 stock active 時上限 16.7%（vs 原本 100%）
+      → 4+ stocks active 時 normal 運作
+
+    跟 full 的差別保留：
+    - dynamic: dropna + renormalize（cap 以避免極端）
+    - full: fillna(0) + fixed weights（從第一天就以原重計入）
+    """
     r = _safe_pct_change(p)
     vals: list[float] = []
     n_active_list: list[int] = []
+    n_total = len(w)
+    cap_per_stock = 1.5 / n_total if n_total > 0 else 1.0  # 最多放大 1.5 倍
     # n_active 以「當天有有效價格的股票數」算（更直觀，反映「組合含多少檔」）
     for date, row_p in p.iterrows():
         valid_prices = row_p.dropna()
@@ -145,8 +158,12 @@ def _mode_dynamic(p: pd.DataFrame, w: pd.Series) -> tuple[pd.Series, pd.Series]:
             vals.append(0.0)
             n_active_list.append(int(len(valid_prices)))
             continue
-        w_valid = w_valid / s
-        vals.append(float((valid_rets * w_valid).sum()))
+        # 原本: w_valid = w_valid / s (完全正規化 → 1 個 stock 被放大為 100%)
+        # 修法: 先正規化、再 cap 每檔上限
+        w_normalized = w_valid / s
+        w_capped = w_normalized.clip(upper=cap_per_stock)
+        # 如果 cap 生效，sum 會 < 1（不是 100% allocation）→ 保留原意
+        vals.append(float((valid_rets * w_capped).sum()))
         n_active_list.append(int(len(valid_prices)))
     pr = pd.Series(vals, index=p.index, name='portfolio_return')
     n_active = pd.Series(n_active_list, index=p.index, dtype=float)
@@ -160,10 +177,23 @@ def _safe_pct_change(p: pd.DataFrame) -> pd.DataFrame:
 
 
 def _mode_full(p: pd.DataFrame, w: pd.Series) -> tuple[pd.Series, pd.Series]:
-    """Full Available History：每支股票從最早資料開始算（!= 0 報酬）"""
-    # 跟 dynamic 一樣：每日只看當天有資料的股票、權重正規化
-    # 但 history_diag 會反映每支股票自己的「完整歷史長度」
-    return _mode_dynamic(p, w)
+    """Full Available History：每支股票從自己最早資料開始算（fixed weights, fillna(0)）
+
+    跟 dynamic 的關鍵差別：
+    - dynamic: 每日重新正規化權重（早期股票被放大）
+    - full: 固定權重 + fillna(0)（早期股票不放大，避免 MDD 被讇大）
+
+    驗收標準 #7 #8:
+    - Full 跟 Dynamic 的 metrics 不會完全相同（因為 full 不重新正規化）
+    - Full 的 MDD 應該比 Dynamic 小（因為沒有重複增強早期股票 contribution）
+    """
+    r = _safe_pct_change(p)
+    # fillna(0) 而不是 dropna: 未上市的股票當天 return = 0（代表不在 portfolio）
+    # 不重新正規化權重
+    r_filled = r.fillna(0)
+    pr = r_filled.mul(w, axis=1).sum(axis=1, min_count=1)
+    n_active = pd.Series(p.notna().sum(axis=1), index=p.index, dtype=float)
+    return pr, n_active
 
 
 # ───────── 指標 ─────────
@@ -336,13 +366,21 @@ def per_stock_history(
     for t in prices.columns:
         s = prices[t].dropna()
         if s.empty:
-            per[t] = {'years': 0.0, 'first_date': None, 'last_date': None, 'rows': 0, 'first_close': None}
+            per[t] = {
+                'years': 0.0,
+                'start': None,
+                'end': None,
+                'rows': 0,
+                'first_close': None,
+                'last_close': None,
+            }
             continue
         per[t] = {
             'years': round((s.index[-1] - s.index[0]).days / 365.25, 2),
-            'first_date': str(s.index[0].date()),
-            'last_date': str(s.index[-1].date()),
+            'start': str(s.index[0].date()),
+            'end': str(s.index[-1].date()),
             'rows': int(len(s)),
             'first_close': round(float(s.iloc[0]), 2),
+            'last_close': round(float(s.iloc[-1]), 2),
         }
     return per

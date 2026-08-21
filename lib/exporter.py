@@ -200,8 +200,8 @@ def render_pdf_report(analyze: dict, out_path: Path, profile_name: str = '') -> 
             info = psh[t]
             rows.append([
                 t + (' ⚠️' if t in short else ''),
-                info.get('first_date') or '—',
-                info.get('last_date') or '—',
+                info.get('start') or info.get('first_date') or '—',
+                info.get('end') or info.get('last_date') or '—',
                 str(info.get('rows', 0)),
                 f"{info.get('years', 0):.2f}",
                 _fmt_float(info.get('first_close'), 2),
@@ -277,11 +277,11 @@ def render_pdf_report(analyze: dict, out_path: Path, profile_name: str = '') -> 
         for s in scenarios:
             rows.append([
                 s.get('scenario', '—'),
-                f"P{int(s.get('percentile', 0) * 100)}",
+                f"P{int(s.get('quantile', s.get('percentile', 0)) * 100)}",
                 _fmt_pct(s.get('cagr')),
                 _fmt_money(fc.get('pv')),
-                _fmt_money(s.get('future_value')),
-                f"{s.get('multiple', 0):.2f}x",
+                _fmt_money(s.get('fv', s.get('future_value'))),
+                f"{s.get('multiplier', s.get('multiple', 0)):.2f}x",
             ])
         t = Table(rows, colWidths=[40 * mm, 20 * mm, 30 * mm, 28 * mm, 32 * mm, 16 * mm])
         styles = [

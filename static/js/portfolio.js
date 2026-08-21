@@ -389,20 +389,45 @@
     const rs = f.rolling || [];
     if (rollChart) rollChart.destroy();
     const ctx = document.getElementById('rollChart');
+
+    // 主資料集：滾動 CAGR 時間序列
+    const datasets = [{
+      label: 'Rolling N-Year CAGR %',
+      data: rs.map((x) => x.cagr * 100),
+      borderColor: '#58a6ff',
+      backgroundColor: 'rgba(88, 166, 255, 0.1)',
+      borderWidth: 1.5,
+      pointRadius: 2,
+      tension: 0.1,
+      fill: true,
+    }];
+
+    // 5 條水平分位線（從 f.percentiles 讀股寶已算好的）
+    const pctColors = {
+      Bear:         '#f85149',  // P10 紅
+      Conservative: '#d29922',  // P25 橘
+      Base:         '#58a6ff',  // P50 藍（同主線色但虚線區分）
+      Optimistic:   '#3fb950',  // P75 綠
+      Bull:         '#8957e5',  // P90 紫
+    };
+    (f.scenarios || []).forEach((s) => {
+      const cagrPct = (s.cagr * 100).toFixed(2);
+      datasets.push({
+        label: `${s.label} (P${(s.quantile * 100) | 0}) ${cagrPct}%`,
+        data: rs.map(() => s.cagr * 100),  // 水平線：每個點同值
+        borderColor: pctColors[s.label] || '#888',
+        borderDash: [5, 4],
+        borderWidth: 1.2,
+        pointRadius: 0,
+        fill: false,
+      });
+    });
+
     rollChart = new Chart(ctx, {
       type: 'line',
       data: {
         labels: rs.map((x) => x.end),
-        datasets: [{
-          label: 'Rolling N-Year CAGR %',
-          data: rs.map((x) => x.cagr * 100),
-          borderColor: '#58a6ff',
-          backgroundColor: 'rgba(88, 166, 255, 0.1)',
-          borderWidth: 1.5,
-          pointRadius: 2,
-          tension: 0.1,
-          fill: true,
-        }],
+        datasets,
       },
       options: {
         responsive: true,

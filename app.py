@@ -1,12 +1,12 @@
 """
 app.py — Flask 入口
-- 5 個 API：
+- 4 個 API：
   GET  /                  首頁
   GET  /api/health        健康檢查
   GET  /api/profiles      列出 user_profile/*.csv
   GET  /api/profile/<n>   預覽單檔名單
   POST /api/analyze       主分析（3 模式 + N-Year 預估）
-  POST /api/export        匯出 HTML / PDF
+  POST /api/export        匯出 HTML
 - 報表檔案透過 /data/reports/ 靜態路徑下載
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ from app_config import (  # noqa: E402
     TEMPLATES_DIR, USER_PROFILE_DIR,
 )
 from lib.csv_loader import CSVLintError, list_profile_csvs, load_portfolio_csv  # noqa: E402
-from lib.exporter import render_html_report, render_pdf_report  # noqa: E402
+from lib.exporter import render_html_report  # noqa: E402
 from lib.finmind import FinMindClient, FinMindError, load_finmind_token  # noqa: E402
 from lib.forecast import ForecastError, build_forecast  # noqa: E402
 from lib.i18n import TERMS  # noqa: E402
@@ -90,11 +90,6 @@ def create_app() -> Flask:
             checks['pandas_ok'] = True
         except ImportError:
             checks['pandas_ok'] = False
-        try:
-            import reportlab  # noqa: F401
-            checks['reportlab_ok'] = True
-        except ImportError:
-            checks['reportlab_ok'] = False
         all_ok = all(v for v in checks.values() if isinstance(v, bool))
         return jsonify({'ok': all_ok, 'checks': checks}), 200 if all_ok else 503
 
@@ -172,36 +167,26 @@ def create_app() -> Flask:
     def export():
         body = request.get_json(silent=True) or {}
         result = body.get('result')
-        fmt = (body.get('format') or 'pdf').lower()
+        fmt = (body.get('format') or 'html').lower()
         profile_name = (body.get('profile_name') or '').strip()
         if not result or not isinstance(result, dict):
             return jsonify({'error': 'result 不可為空'}), 400
-        if fmt not in ('html', 'pdf'):
-            return jsonify({'error': "format 必須是 html 或 pdf"}), 400
+        if fmt != 'html':
+            return jsonify({'error': 'format 必須是 html'}), 400
 
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
         uid = uuid.uuid4().hex[:8]
-        if fmt == 'pdf':
-            fname = f'portfolio_forecast_{ts}_{uid}.pdf'
-            out = REPORTS_DIR / fname
-            try:
-                render_pdf_report(result, out, profile_name=profile_name)
-            except Exception as e:  # noqa: BLE001
-                import traceback
-                app.logger.error('PDF 產生失敗：%s\n%s', e, traceback.format_exc())
-                return jsonify({'error': f'PDF 產生失敗：{e}'}), 500
-        else:
-            fname = f'portfolio_forecast_{ts}_{uid}.html'
-            out = REPORTS_DIR / fname
-            try:
-                out.write_text(
-                    render_html_report(result, profile_name=profile_name),
-                    encoding='utf-8',
-                )
-            except Exception as e:  # noqa: BLE001
-                import traceback
-                app.logger.error('HTML 產生失敗：%s\n%s', e, traceback.format_exc())
-                return jsonify({'error': f'HTML 產生失敗：{e}'}), 500
+        fname = f'portfolio_forecast_{ts}_{uid}.html'
+        out = REPORTS_DIR / fname
+        try:
+            out.write_text(
+                render_html_report(result, profile_name=profile_name),
+                encoding='utf-8',
+            )
+        except Exception as e:  # noqa: BLE001
+            import traceback
+            app.logger.error('HTML 產生失敗：%s\n%s', e, traceback.format_exc())
+            return jsonify({'error': f'HTML 產生失敗：{e}'}), 500
 
         return jsonify({
             'file': fname,

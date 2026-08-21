@@ -141,7 +141,6 @@
     clearErr();
     $('out').hidden = true;
     $('btnRun').disabled = true;
-    $('btnExportPdf').disabled = true;
     $('btnExportHtml').disabled = true;
     $('status').textContent = '分析中（首次抓 FinMind 需 30~60 秒）...';
 
@@ -171,7 +170,6 @@
       }
       lastResult = d;
       renderAll(d);
-      $('btnExportPdf').disabled = false;
       $('btnExportHtml').disabled = false;
       $('status').textContent = '✓ 完成';
     } catch (e) {
@@ -522,7 +520,6 @@
   // ────────── 綁定 ──────────
   document.addEventListener('DOMContentLoaded', () => {
     $('fAnalyze').addEventListener('submit', runAnalyze);
-    $('btnExportPdf').addEventListener('click', () => exportResult('pdf'));
     $('btnExportHtml').addEventListener('click', () => exportResult('html'));
     bindTabs();
     bindUpload();

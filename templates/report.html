@@ -152,12 +152,28 @@
       ('full', '各標的完整歷史（單獨診斷）',
        '每檔股票各自從上市第一天算到現在，用來檢視個股本身的歷史能力。'),
     ] %}
+    {# 判斷三模式是否共用同一組 start/end（都存在且相同 → hoist）#}
+    {% set cs = analyze.common.metrics.start if analyze.common else None %}
+    {% set ce = analyze.common.metrics.end if analyze.common else None %}
+    {% set ds = analyze.dynamic.metrics.start if analyze.dynamic else None %}
+    {% set de = analyze.dynamic.metrics.end if analyze.dynamic else None %}
+    {% set fs = analyze.full.metrics.start if analyze.full else None %}
+    {% set fe = analyze.full.metrics.end if analyze.full else None %}
+    {% set all_present = cs and ds and fs %}
+    {% set same_dates = all_present and (cs == ds == fs) and (ce == de == fe) %}
+    {% if same_dates %}
+    <div class="note" style="margin-top:6px;">
+      <b>三模式共用起訖日：</b>　開始日期 <b>{{ cs }}</b>　｜　結束日期 <b>{{ ce }}</b>
+      <span style="color:#7a5b00; font-size:12px;">（避免重複,提高至上一階顯示）</span>
+    </div>
+    {% endif %}
     {% for mode_key, mode_label, mode_tip in mode_meta %}
       {% if analyze[mode_key] %}
       <h3 style="color:#17365d; margin-top:18px;">▶ {{ mode_label }}</h3>
       <p style="color:#5a6a7e; font-size:12px; margin:0 0 8px;">{{ mode_tip }}</p>
       {% set m = analyze[mode_key].metrics %}
-      <div class="kpi">
+      <div class="kpi" {% if same_dates %}style="grid-template-columns: repeat(3, 1fr);"{% endif %}>
+        {% if not same_dates %}
         <div>
           <span class="kpi-name">開始日期</span>
           <b class="kpi-value">{{ m.start }}</b>
@@ -166,6 +182,7 @@
           <span class="kpi-name">結束日期</span>
           <b class="kpi-value">{{ m.end }}</b>
         </div>
+        {% endif %}
         <div>
           <span class="kpi-name">回測年數</span>
           <b class="kpi-value">{{ "%.2f"|format(m.years) }}</b>
@@ -234,6 +251,14 @@
       </tbody>
     </table>
     <p class="meta">歷史滾動 N 年樣本數：<b>{{ analyze.forecast.rolling_count }}</b></p>
+    {% endif %}
+
+    {% if rolling_chart_svg %}
+    <h3 style="color:#17365d; margin-top:20px;">⑦ 歷史滾動 N 年收益分布圖</h3>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">
+      這張圖讓你看 5 個情境的分位數（P10/P25/P50/P75/P90）落在哪裡 — 分布越分散，未來越不確定。
+    </p>
+    {{ rolling_chart_svg|safe }}
     {% endif %}
   </div>
 

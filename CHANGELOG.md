@@ -138,3 +138,53 @@
 ### Known Issue(待修)
 
 - **前端 stale error 訊息**:使用者回報 PDF 失敗訊息出現在網頁(console 顯示 500),但實際 PDF 檔案已成功產生(15.6KB)。`/api/export` 後端 OK,問題在前端 `exportResult()` 拿到 response 後處理邏輯。**本次先 push 此版,issue 留後續修**(可能是 browser cache stale lastResult 或前端 render 邏輯)
+
+---
+
+## 2026-08-21 — 移除 PDF 匯出 + 報告排版調整
+
+### Changed (BREAKING)
+
+- **移除匯出 PDF 功能**
+  - `templates/index.html`:移除 `<button id="btnExportPdf">匯出 PDF</button>`
+  - `static/js/portfolio.js`:移除 3 處 `btnExportPdf` 參照（disabled / addEventListener）
+  - `app.py`:
+    - import 只剩 `render_html_report`,PDF 枝節拿掉
+    - `/api/export` 只接受 `format=html`(預設)
+    - `/api/health` 拿掉 `reportlab_ok` 檢查
+  - `lib/exporter.py`:删除整個 `render_pdf_report` 及相關 helper（_fmt_pct / _fmt_money / _fmt_float / _mode_summary）、reportlab imports
+  - `requirements.txt`:移除 `reportlab>=4.0`（pillow 保留,他處未依賴）
+  - `tests/test_exporter.py`:移除 `test_pdf_writes_file` + `render_pdf_report` import
+
+### Added
+
+- **⑦ 歷史滾動 N 年收益分布圖 納入 HTML 報告 Section 三**
+  - `lib/exporter.py`:新增 `_render_rolling_chart_svg(forecast)` — 純 Python 生成 inline SVG，不依賴 matplotlib / chart.js
+  - 圖內容:滾動 CAGR 時間序列折線 + 5 條水平分位線（Bear P10 / Conservative P25 / Base P50 / Optimistic P75 / Bull P90）+ 軸標題
+  - 配色/虛線與 web UI Chart.js 一致（GitHub dark 配色系）
+  - `templates/report.html` Section 三 表格下方內嵌 `{{ rolling_chart_svg|safe }}`(有資料才顯示)
+
+### Improved
+
+- **HTML 報告 Section 二「3 模式比較」排版調整**
+  - 當 3 模式的 `metrics.start` / `metrics.end` 相同,自動 hoist 至上一階顯示（避免每個模式重複列「開始日期 / 結束日期」）
+  - hoist 區塊：黃色 note「三模式共用起訖日：　開始日期 X　｜　結束日期 Y」
+  - 每個模式的 KPI grid：6 格（去除 開始/結束） + `grid-template-columns: repeat(3, 1fr)`
+  - 若 3 模式日期不一致(混合上市年代名單)：退回各模式顯示 8 格(向後相容)
+  - 判斷邏輯用 Jinja2 inline set + all/none 比較,不需 Python 端前置計算
+
+### Tests
+
+- ✅ `test_html_includes_rolling_chart_svg`:驗證 Section 三 內含 `<svg>` + `<polyline>` + 5 條分位線標籤
+- ✅ `test_html_section_two_hoisted_dates_when_same`:驗證三模式共用日期時,「開始日期」/「結束日期」各只出現 1 次（hoist 成功）
+- ✅ `test_html_section_two_fallback_when_dates_differ`:驗證日期不同時退回各模式顯示（≥3 次）
+- ✅ 全部 39 個 pytest 案例綠
+
+### Files Changed
+
+- `templates/index.html`、`templates/report.html`
+- `static/js/portfolio.js`
+- `app.py`、`lib/exporter.py`
+- `requirements.txt`
+- `tests/test_exporter.py`（新增 3 個案例,刪除 1 個）
+- `CHANGELOG.md`（本節）
